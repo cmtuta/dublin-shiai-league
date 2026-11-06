@@ -768,6 +768,9 @@ function turnPanelHtml(t) {
     (meta.length ? '<div class="turn-date">' + esc(meta.join(' · ')) + '</div>' : '') +
     '</div>' + badge + '</div>';
   html += turnPlayersHtml(t.id);
+  // The competing-players and Fighting Spirit section comes before the
+  // rounds, so the editor sets up the turn before recording its matches.
+  if (isEditor()) html += turnAdminHtml(t);
   var ms = appState.matches
     .filter(function (m) { return m.turnId === t.id; })
     .sort(function (a, b) {
@@ -793,7 +796,6 @@ function turnPanelHtml(t) {
       }
     });
   }
-  if (isEditor()) html += turnAdminHtml(t);
   html += '</div>';
   return html;
 }
