@@ -353,14 +353,6 @@
       <h1>Dublin Shiai League</h1>
       <p class="season"><select id="seasonSelect" aria-label="Season">
         <option value="2027">2027 season</option>
-        <option value="2028">2028 season</option>
-        <option value="2029">2029 season</option>
-        <option value="2030">2030 season</option>
-        <option value="2031">2031 season</option>
-        <option value="2032">2032 season</option>
-        <option value="2033">2033 season</option>
-        <option value="2034">2034 season</option>
-        <option value="2035">2035 season</option>
       </select></p>
     </div>
     <div class="head-right">
@@ -422,7 +414,7 @@ var saveTimers = {}; // matchId -> pending auto-save timer
 // Seasons: the player list and Elo carry over year to year, but the
 // schedule, results, scoreboard and fighter stats are all for the
 // selected season only. A turn belongs to the year of its date.
-var SEASONS = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
+var SEASONS = [2027];
 var selectedSeason = 2027;
 try {
   var savedSeason = parseInt(localStorage.getItem('dsl_season') || '', 10);
@@ -433,9 +425,9 @@ function turnYear(t) {
   return t && t.date ? parseInt(String(t.date).substring(0, 4), 10) : null;
 }
 
-// Seasons offered in the dropdown: the list the server returns (the
-// 2027-2035 range plus any year an editor added), falling back to the
-// built-in range before the first state load.
+// Seasons offered in the dropdown: the list the server returns (only
+// 2027 pre-loaded, plus any year an editor added), falling back to the
+// built-in list before the first state load.
 function availableSeasons() {
   if (appState && appState.seasons && appState.seasons.length) return appState.seasons;
   return SEASONS;
