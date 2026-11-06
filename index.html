@@ -259,6 +259,18 @@
   .section-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .section-head h3 { margin: 0; }
   .section-actions { display: flex; gap: 8px; }
+  .fs-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fs-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #e8edf1;
+    border-radius: 999px;
+    padding: 3px 6px 3px 10px;
+    font-size: 14px;
+  }
+  .fs-chip .btn { padding: 2px 7px; font-size: 13px; }
+  .bye-line { color: var(--muted); font-style: italic; margin: 4px 0 8px 2px; }
   /* Scoreboard */
   table.scoreboard { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.scoreboard th {
@@ -509,6 +521,16 @@ async function fetchState() {
     var data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not load the league data.');
     appState = data;
+    // Defensive: older backends returned a single Fighting Spirit id
+    // (a string) instead of a list; normalise it so the list code below
+    // never breaks during a deploy.
+    (appState.turns || []).forEach(function (t) {
+      if (typeof t.fightingSpirit === 'string') {
+        t.fightingSpirit = t.fightingSpirit ? [t.fightingSpirit] : [];
+      }
+      if (!Array.isArray(t.fightingSpirit)) t.fightingSpirit = [];
+    });
+    if (!Array.isArray(appState.byes)) appState.byes = [];
     render();
   } catch (err) {
     showStatus('Could not load the league data. Please try again later.', true);
@@ -753,17 +775,27 @@ function turnAdminHtml(t) {
     '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">' + (t.status === 'Complete' ? 'Unmark complete' : 'Mark complete') + '</button>' +
   '</div>';
   var competing = appState.players.filter(function (p) { return selected[p.id]; }).sort(compareName);
-  html += '<h3>Fighting Spirit award</h3><div class="btnrow">';
+  html += '<h3>Fighting Spirit awards</h3><div class="btnrow">';
   if (!competing.length) {
     html += '<span class="empty">Select the competing players above first.</span>';
   } else {
-    html += '<select id="fs-' + esc(t.id) + '">' +
-      '<option value="">No winner yet</option>' +
-      competing.map(function (p) {
-        return '<option value="' + esc(p.id) + '"' + (t.fightingSpirit === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>';
-      }).join('') +
-    '</select>' +
-    '<button class="btn" data-action="save-fighting-spirit" data-turn="' + esc(t.id) + '">Save winner</button>';
+    var winners = (t.fightingSpirit || []).map(function (id) { return playerById(id); }).filter(function (p) { return !!p; });
+    if (winners.length) {
+      html += '<span class="fs-list">' + winners.map(function (p) {
+        return '<span class="fs-chip">' + esc(p.name) +
+          ' <button class="btn small danger" data-action="remove-fighting-spirit" data-turn="' + esc(t.id) + '" data-player="' + esc(p.id) + '" aria-label="Remove ' + esc(p.name) + ' from Fighting Spirit">×</button></span>';
+      }).join('') + '</span>';
+    }
+    var remaining = competing.filter(function (p) { return (t.fightingSpirit || []).indexOf(p.id) === -1; });
+    if (remaining.length) {
+      html += '<select id="fs-add-' + esc(t.id) + '">' +
+        '<option value="">Add a winner...</option>' +
+        remaining.map(function (p) {
+          return '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<button class="btn" data-action="add-fighting-spirit" data-turn="' + esc(t.id) + '">Add</button>';
+    }
   }
   html += '</div></div>';
   return html;
@@ -806,6 +838,16 @@ function turnPanelHtml(t) {
         '<span>Round ' + r + '</span>' +
         (isEditor() ? '<button class="btn small danger" data-action="delete-round" data-turn="' + esc(t.id) + '" data-round="' + r + '">Delete round</button>' : '') +
       '</div>';
+      // Who sat out this round (recorded when the round was generated,
+      // usually the one player left over when the count is odd).
+      var roundByes = (appState.byes || []).filter(function (b) { return b.turnId === t.id && b.round === r; });
+      if (roundByes.length) {
+        var byeNames = roundByes.map(function (b) {
+          var p = playerById(b.playerId);
+          return p ? esc(p.name) : 'Unknown player';
+        });
+        html += '<p class="bye-line">Sitting out: ' + byeNames.join(', ') + '</p>';
+      }
       if (!collapsed) {
         byRound[r].forEach(function (m) { html += matchCardHtml(m, t); });
       }
@@ -975,7 +1017,7 @@ function fighterStats(pid) {
     if (t && turnYear(t) === selectedSeason) st.turns++;
   });
   appState.turns.forEach(function (t) {
-    if (t.fightingSpirit === pid && turnYear(t) === selectedSeason) st.awards.push(t);
+    if ((t.fightingSpirit || []).indexOf(pid) !== -1 && turnYear(t) === selectedSeason) st.awards.push(t);
   });
   appState.matches.forEach(function (m) {
     if (!m.completed) return;
@@ -1142,7 +1184,12 @@ async function handleAction(action, target) {
       return;
     } else if (action === 'generate-round') {
       var gen = await api('generateRound', { turnId: turnId });
-      showStatus('Round ' + gen.round + ' generated.');
+      var msg = 'Round ' + gen.round + ' generated.';
+      if (gen.byes && gen.byes.length) {
+        var byeNames = gen.byes.map(function (id) { return playerName(id); }).filter(function (n) { return !!n; });
+        if (byeNames.length) msg += ' Sitting out: ' + byeNames.join(', ') + '.';
+      }
+      showStatus(msg);
     } else if (action === 'mark-complete') {
       // Toggle: a Complete turn goes back to empty, otherwise it is marked Complete.
       var turn = null;
@@ -1150,10 +1197,23 @@ async function handleAction(action, target) {
       var toComplete = !turn || turn.status !== 'Complete';
       await api('setTurnStatus', { turnId: turnId, status: toComplete ? 'Complete' : '' });
       showStatus(toComplete ? 'Turn marked complete.' : 'Turn unmarked (no longer complete).');
-    } else if (action === 'save-fighting-spirit') {
-      var fsSel = document.getElementById('fs-' + turnId);
-      await api('setFightingSpirit', { turnId: turnId, playerId: fsSel ? fsSel.value : '' });
-      showStatus('Fighting Spirit winner saved.');
+    } else if (action === 'add-fighting-spirit') {
+      var fsAdd = document.getElementById('fs-add-' + turnId);
+      var addId = fsAdd ? fsAdd.value : '';
+      if (!addId) return;
+      var turn = null;
+      appState.turns.forEach(function (x) { if (x.id === turnId) turn = x; });
+      var ids = turn ? (turn.fightingSpirit || []).slice() : [];
+      if (ids.indexOf(addId) === -1) ids.push(addId);
+      await api('setFightingSpirit', { turnId: turnId, playerIds: ids });
+      showStatus('Fighting Spirit award added.');
+    } else if (action === 'remove-fighting-spirit') {
+      var remId = target.dataset.player;
+      var turn2 = null;
+      appState.turns.forEach(function (x) { if (x.id === turnId) turn2 = x; });
+      var ids2 = turn2 ? (turn2.fightingSpirit || []).filter(function (x) { return x !== remId; }) : [];
+      await api('setFightingSpirit', { turnId: turnId, playerIds: ids2 });
+      showStatus('Fighting Spirit award removed.');
     } else if (action === 'edit-turn-date') {
       editingTurnDate = turnId;
       render();
