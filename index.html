@@ -781,7 +781,15 @@ function renderResults() {
 
 function scoreboardRows() {
   var s = appState.settings;
-  var rows = appState.players.map(function (p) {
+  // The scoreboard is specific to the selected season, and only shows
+  // players who attended at least one turn in that season.
+  var turnYearById = {};
+  appState.turns.forEach(function (t) { turnYearById[t.id] = turnYear(t); });
+  var attended = {};
+  appState.turnPlayers.forEach(function (tp) {
+    if (turnYearById[tp.turnId] === selectedSeason) attended[tp.playerId] = true;
+  });
+  var rows = appState.players.filter(function (p) { return attended[p.id]; }).map(function (p) {
     return {
       id: p.id, name: p.name, elo: p.elo,
       played: 0, won: 0, drawn: 0, lost: 0, ipFor: 0, ipAgainst: 0, points: 0
@@ -789,11 +797,8 @@ function scoreboardRows() {
   });
   var byId = {};
   rows.forEach(function (r) { byId[r.id] = r; });
-  // The scoreboard is specific to the selected season: only matches
-  // in turns of that year count. Elo is the player's current (global)
-  // rating, which carries over year to year.
-  var turnYearById = {};
-  appState.turns.forEach(function (t) { turnYearById[t.id] = turnYear(t); });
+  // Only matches in turns of the selected season count. Elo is the
+  // player's current (global) rating, which carries over year to year.
   appState.matches.forEach(function (m) {
     if (!m.completed) return;
     if (turnYearById[m.turnId] !== selectedSeason) return;
@@ -832,7 +837,9 @@ function renderScoreboard() {
   var rows = scoreboardRows();
   var html = '<div class="panel"><h2>Scoreboard</h2>';
   if (!rows.length) {
-    html += '<p class="empty">No players yet - add a player to get started.</p>';
+    html += '<p class="empty">' + (appState.players.length
+      ? 'No players have attended a turn in ' + selectedSeason + ' yet.'
+      : 'No players yet - add a player to get started.') + '</p>';
   } else {
     html += '<table class="scoreboard"><thead><tr>' +
       '<th>Rank</th><th>Name</th><th>Points</th><th>Elo</th><th>Played</th><th>Won</th><th>Drawn</th><th>Lost</th>' +
