@@ -262,6 +262,42 @@
   table.scoreboard td { padding: 8px; text-align: right; border-bottom: 1px solid var(--line); }
   table.scoreboard tr:nth-child(even) td { background: var(--bg); }
   .updated { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  /* Fighters */
+  .btn.danger { background: #c0392b; border-color: #c0392b; }
+  .btn.danger:hover { background: #a93226; }
+  .pick-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+    margin: 14px 0;
+  }
+  .stat { background: var(--panel); border-radius: 6px; padding: 10px 12px; }
+  .stat .num { font-size: 22px; font-weight: 700; color: var(--navy); }
+  .stat .lbl { font-size: 12px; color: var(--muted); }
+  .types-line {
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    padding: 6px 12px 10px;
+    border-top: 1px solid var(--line);
+  }
+  .to-top {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 20;
+    background: var(--navy);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(22, 54, 92, 0.35);
+  }
+  .to-top[hidden] { display: none; }
   /* Login modal */
   .modal[hidden] { display: none; }
   .modal {
@@ -304,6 +340,7 @@
     <button class="tab active" data-tab="schedule">Schedule</button>
     <button class="tab" data-tab="results">Results</button>
     <button class="tab" data-tab="scoreboard">Scoreboard</button>
+    <button class="tab" data-tab="fighters">Fighters</button>
   </nav>
 </header>
 
@@ -312,9 +349,12 @@
   <section id="tab-schedule" class="tabpage"></section>
   <section id="tab-results" class="tabpage" hidden></section>
   <section id="tab-scoreboard" class="tabpage" hidden></section>
+  <section id="tab-fighters" class="tabpage" hidden></section>
 </main>
 
 <footer>Dublin Kendo Kobukai · Dublin Shiai League 2027</footer>
+
+<button id="toTopBtn" class="to-top" hidden>↑ Top</button>
 
 <div id="loginModal" class="modal" hidden>
   <div class="modal-card">
@@ -435,6 +475,7 @@ function render() {
   renderSchedule();
   renderResults();
   renderScoreboard();
+  renderFighters();
   updateAuthUI();
   window.scrollTo(0, y);
 }
@@ -510,6 +551,27 @@ function ipponOptions(v) {
   return html;
 }
 
+var IPPON_TYPES = ['Men', 'Kote', 'Do', 'Tsuki', 'Hansoku'];
+
+function ipponTypeOptions(v) {
+  var html = '<option value="">Type</option>';
+  IPPON_TYPES.forEach(function (t) {
+    html += '<option value="' + t + '"' + (v === t ? ' selected' : '') + '>' + t + '</option>';
+  });
+  return html;
+}
+
+// One type dropdown per ippon scored by this side (none when the count is 0).
+function typeSelectsHtml(m, side) {
+  var count = side === 'white' ? m.whiteIppon : m.redIppon;
+  var types = side === 'white' ? (m.whiteIpponTypes || []) : (m.redIpponTypes || []);
+  var html = '';
+  for (var i = 0; i < count; i++) {
+    html += '<select data-f="' + side + 'IpponType' + i + '">' + ipponTypeOptions(types[i] || '') + '</select>';
+  }
+  return html;
+}
+
 function matchCardHtml(m, turn) {
   var meta = esc(turn.name) + ' · Round ' + m.round + ' · Match ' + matchNum(m.id);
   var pill = '<span class="pill' + (m.completed ? '' : ' hidden') + '">Completed</span>';
@@ -520,10 +582,20 @@ function matchCardHtml(m, turn) {
       '<div class="centre">' + centreHtml(m) + '</div>' +
       '<div class="side red"><span>' + esc(playerName(m.redId)) + '</span></div>' +
     '</div>';
+  var wt = (m.whiteIpponTypes || []).filter(function (t) { return t; });
+  var rt = (m.redIpponTypes || []).filter(function (t) { return t; });
+  var typeParts = [];
+  if (wt.length) typeParts.push('White: ' + wt.join(', '));
+  if (rt.length) typeParts.push('Red: ' + rt.join(', '));
+  if (typeParts.length) {
+    html += '<div class="types-line">' + esc(typeParts.join(' · ')) + '</div>';
+  }
   if (isEditor()) {
     html += '<div class="editrow">' +
-      '<label>White ippon <select data-f="whiteIppon">' + ipponOptions(m.whiteIppon) + '</select></label>' +
-      '<label>Red ippon <select data-f="redIppon">' + ipponOptions(m.redIppon) + '</select></label>' +
+      '<label>White ippon <select data-f="whiteIppon">' + ipponOptions(m.whiteIppon) + '</select>' +
+      '<span data-types="white">' + typeSelectsHtml(m, 'white') + '</span></label>' +
+      '<label>Red ippon <select data-f="redIppon">' + ipponOptions(m.redIppon) + '</select>' +
+      '<span data-types="red">' + typeSelectsHtml(m, 'red') + '</span></label>' +
       '<label>White hansoku <select data-f="whiteHansoku">' + ipponOptions(m.whiteHansoku) + '</select></label>' +
       '<label>Red hansoku <select data-f="redHansoku">' + ipponOptions(m.redHansoku) + '</select></label>' +
       '<button class="btn small" data-action="save-match" data-match="' + esc(m.id) + '">Save</button>' +
@@ -585,6 +657,41 @@ function turnAdminHtml(t) {
   return html;
 }
 
+var selectedResultsTurnId = null;
+
+function turnPanelHtml(t) {
+  var badge = t.status === 'Active' ? 'active' : (t.status === 'Complete' ? 'complete' : 'upcoming');
+  var meta = [];
+  if (t.playerCount > 0) meta.push(t.playerCount + (t.playerCount === 1 ? ' player' : ' players'));
+  if (t.fightingSpiritName) meta.push('Fighting Spirit: ' + t.fightingSpiritName);
+  var html = '<div class="panel"><div class="turn-head"><div>' +
+    '<h2>' + esc(t.name) + '</h2>' +
+    (meta.length ? '<div class="turn-date">' + esc(meta.join(' · ')) + '</div>' : '') +
+    '</div><span class="badge ' + badge + '">' + esc(t.status) + '</span></div>';
+  html += turnPlayersHtml(t.id);
+  var ms = appState.matches
+    .filter(function (m) { return m.turnId === t.id; })
+    .sort(function (a, b) {
+      if (a.round !== b.round) return a.round - b.round;
+      return matchNum(a.id) - matchNum(b.id);
+    });
+  if (!ms.length) {
+    html += '<p class="empty">No matches yet - generate the first round.</p>';
+  } else {
+    var currentRound = null;
+    ms.forEach(function (m) {
+      if (m.round !== currentRound) {
+        currentRound = m.round;
+        html += '<div class="round-head">Round ' + m.round + '</div>';
+      }
+      html += matchCardHtml(m, t);
+    });
+  }
+  if (isEditor()) html += turnAdminHtml(t);
+  html += '</div>';
+  return html;
+}
+
 function renderResults() {
   var el = document.getElementById('tab-results');
   if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
@@ -603,10 +710,9 @@ function renderResults() {
       '</form></div>' +
     '</div></div>';
   }
+  // One turn at a time, picked from the dropdown. Most recent first;
+  // the Active turn is the default when there is one.
   var turns = appState.turns.slice().sort(function (a, b) {
-    var aA = a.status === 'Active' ? 0 : 1;
-    var bA = b.status === 'Active' ? 0 : 1;
-    if (aA !== bA) return aA - bA;
     return (b.date || '').localeCompare(a.date || '');
   });
   if (!turns.length) {
@@ -614,37 +720,22 @@ function renderResults() {
     el.innerHTML = html;
     return;
   }
-  turns.forEach(function (t) {
-    var badge = t.status === 'Active' ? 'active' : (t.status === 'Complete' ? 'complete' : 'upcoming');
-    var meta = [];
-    if (t.playerCount > 0) meta.push(t.playerCount + (t.playerCount === 1 ? ' player' : ' players'));
-    if (t.fightingSpiritName) meta.push('Fighting Spirit: ' + t.fightingSpiritName);
-    html += '<div class="panel"><div class="turn-head"><div>' +
-      '<h2>' + esc(t.name) + '</h2>' +
-      (meta.length ? '<div class="turn-date">' + esc(meta.join(' · ')) + '</div>' : '') +
-      '</div><span class="badge ' + badge + '">' + esc(t.status) + '</span></div>';
-    html += turnPlayersHtml(t.id);
-    var ms = appState.matches
-      .filter(function (m) { return m.turnId === t.id; })
-      .sort(function (a, b) {
-        if (a.round !== b.round) return a.round - b.round;
-        return matchNum(a.id) - matchNum(b.id);
-      });
-    if (!ms.length) {
-      html += '<p class="empty">No matches yet - generate the first round.</p>';
-    } else {
-      var currentRound = null;
-      ms.forEach(function (m) {
-        if (m.round !== currentRound) {
-          currentRound = m.round;
-          html += '<div class="round-head">Round ' + m.round + '</div>';
-        }
-        html += matchCardHtml(m, t);
-      });
+  if (!selectedResultsTurnId || !turns.some(function (t) { return t.id === selectedResultsTurnId; })) {
+    var active = null;
+    for (var i = 0; i < turns.length; i++) {
+      if (turns[i].status === 'Active') { active = turns[i]; break; }
     }
-    if (isEditor()) html += turnAdminHtml(t);
-    html += '</div>';
-  });
+    selectedResultsTurnId = active ? active.id : turns[0].id;
+  }
+  var t = null;
+  turns.forEach(function (x) { if (x.id === selectedResultsTurnId) t = x; });
+  html += '<div class="panel"><div class="pick-row"><label for="resultsTurnSelect">Turn</label>' +
+    '<select id="resultsTurnSelect">' +
+    turns.map(function (x) {
+      return '<option value="' + esc(x.id) + '"' + (x.id === t.id ? ' selected' : '') + '>' + esc(x.name) + '</option>';
+    }).join('') +
+    '</select></div></div>';
+  html += turnPanelHtml(t);
   el.innerHTML = html;
 }
 
@@ -717,6 +808,119 @@ function renderScoreboard() {
   el.innerHTML = html;
 }
 
+/* ---------- fighters ---------- */
+
+var selectedFighterId = null;
+
+function statHtml(num, label) {
+  return '<div class="stat"><div class="num">' + num + '</div><div class="lbl">' + esc(label) + '</div></div>';
+}
+
+// Season stats for one fighter, computed from the state the page already has.
+function fighterStats(pid) {
+  var s = appState.settings;
+  var st = {
+    elo: 0, points: 0, turns: 0, played: 0, won: 0, drawn: 0, lost: 0,
+    ipFor: 0, ipAgainst: 0, hansoku: 0,
+    types: { Men: 0, Kote: 0, Do: 0, Tsuki: 0, Hansoku: 0 },
+    awards: []
+  };
+  var p = playerById(pid);
+  if (p) st.elo = p.elo;
+  appState.turnPlayers.forEach(function (tp) { if (tp.playerId === pid) st.turns++; });
+  appState.turns.forEach(function (t) {
+    if (t.fightingSpirit === pid) st.awards.push(t);
+  });
+  appState.matches.forEach(function (m) {
+    if (!m.completed) return;
+    var isWhite = m.whiteId === pid;
+    var isRed = m.redId === pid;
+    if (!isWhite && !isRed) return;
+    st.played++;
+    if (isWhite) {
+      st.ipFor += m.whiteIppon;
+      st.ipAgainst += m.redIppon;
+      st.hansoku += m.whiteHansoku;
+      (m.whiteIpponTypes || []).forEach(function (t) { if (st.types[t] !== undefined) st.types[t]++; });
+      if (m.result === 'White') { st.won++; st.points += s.winPoints; }
+      else if (m.result === 'Red') { st.lost++; st.points += s.lossPoints; }
+      else if (m.result === 'Draw') { st.drawn++; st.points += s.drawPoints; }
+    } else {
+      st.ipFor += m.redIppon;
+      st.ipAgainst += m.whiteIppon;
+      st.hansoku += m.redHansoku;
+      (m.redIpponTypes || []).forEach(function (t) { if (st.types[t] !== undefined) st.types[t]++; });
+      if (m.result === 'Red') { st.won++; st.points += s.winPoints; }
+      else if (m.result === 'White') { st.lost++; st.points += s.lossPoints; }
+      else if (m.result === 'Draw') { st.drawn++; st.points += s.drawPoints; }
+    }
+  });
+  return st;
+}
+
+function renderFighters() {
+  var el = document.getElementById('tab-fighters');
+  if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
+  var players = appState.players.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+  if (!players.length) {
+    el.innerHTML = '<div class="panel"><h2>Fighters</h2><p class="empty">No fighters yet - add a player to get started.</p></div>';
+    return;
+  }
+  if (!selectedFighterId || !playerById(selectedFighterId)) selectedFighterId = players[0].id;
+  var p = playerById(selectedFighterId);
+  var st = fighterStats(p.id);
+  var html = '<div class="panel"><h2>Fighters</h2>' +
+    '<div class="pick-row"><label for="fighterSelect">Fighter</label>' +
+    '<select id="fighterSelect">' +
+    players.map(function (pl) {
+      return '<option value="' + esc(pl.id) + '"' + (pl.id === p.id ? ' selected' : '') + '>' + esc(pl.name) + '</option>';
+    }).join('') +
+    '</select>';
+  if (isEditor()) {
+    if (st.played === 0) {
+      html += '<button class="btn small danger" data-action="delete-fighter" data-player="' + esc(p.id) + '">Delete fighter</button>';
+    } else {
+      html += '<span class="hint">A fighter with matches cannot be deleted.</span>';
+    }
+  }
+  html += '</div>';
+  html += '<div class="stat-grid">' +
+    statHtml(st.elo, 'Elo') + statHtml(st.points, 'Points') + statHtml(st.turns, 'Turns attended') +
+    statHtml(st.played, 'Matches') + statHtml(st.won, 'Won') + statHtml(st.drawn, 'Drew') + statHtml(st.lost, 'Lost') +
+    statHtml(st.ipFor, 'Ippon for') + statHtml(st.ipAgainst, 'Ippon against') + statHtml(st.hansoku, 'Hansoku') +
+    '</div>';
+  html += '<p><strong>Ippons scored by type:</strong> ' +
+    esc(['Men', 'Kote', 'Do', 'Tsuki', 'Hansoku'].map(function (t) { return t + ': ' + st.types[t]; }).join(' · ')) + '</p>';
+  if (st.awards.length) {
+    html += '<p><strong>Fighting Spirit awards:</strong> ' +
+      esc(st.awards.map(function (t) { return t.name; }).join(', ')) + '</p>';
+  } else {
+    html += '<p class="empty">No Fighting Spirit awards yet.</p>';
+  }
+  html += '</div>';
+  var turnById = {};
+  appState.turns.forEach(function (t) { turnById[t.id] = t; });
+  var ms = appState.matches
+    .filter(function (m) { return m.whiteId === p.id || m.redId === p.id; })
+    .sort(function (a, b) {
+      var da = (turnById[a.turnId] && turnById[a.turnId].date) || '';
+      var db = (turnById[b.turnId] && turnById[b.turnId].date) || '';
+      if (db !== da) return db.localeCompare(da);
+      if (b.round !== a.round) return b.round - a.round;
+      return matchNum(b.id) - matchNum(a.id);
+    });
+  html += '<div class="panel"><h2>Match history</h2>';
+  if (!ms.length) {
+    html += '<p class="empty">No matches yet.</p>';
+  } else {
+    ms.forEach(function (m) {
+      html += matchCardHtml(m, turnById[m.turnId] || { name: 'Unknown turn' });
+    });
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 /* ---------- actions ---------- */
 
 function setTab(name) {
@@ -724,7 +928,7 @@ function setTab(name) {
   document.querySelectorAll('.tab').forEach(function (b) {
     b.classList.toggle('active', b.dataset.tab === name);
   });
-  ['schedule', 'results', 'scoreboard'].forEach(function (t) {
+  ['schedule', 'results', 'scoreboard', 'fighters'].forEach(function (t) {
     document.getElementById('tab-' + t).hidden = (t !== name);
   });
 }
@@ -732,6 +936,17 @@ function setTab(name) {
 function readSelect(card, field) {
   var sel = card.querySelector('select[data-f="' + field + '"]');
   return sel ? parseInt(sel.value, 10) : 0;
+}
+
+function readTypeSelects(card, side) {
+  var vals = [];
+  var i = 0;
+  var sel;
+  while ((sel = card.querySelector('select[data-f="' + side + 'IpponType' + i + '"]'))) {
+    vals.push(sel.value || '');
+    i++;
+  }
+  return vals;
 }
 
 async function handleAction(action, target) {
@@ -747,9 +962,17 @@ async function handleAction(action, target) {
         whiteIppon: readSelect(card, 'whiteIppon'),
         redIppon: readSelect(card, 'redIppon'),
         whiteHansoku: readSelect(card, 'whiteHansoku'),
-        redHansoku: readSelect(card, 'redHansoku')
+        redHansoku: readSelect(card, 'redHansoku'),
+        whiteIpponTypes: readTypeSelects(card, 'white'),
+        redIpponTypes: readTypeSelects(card, 'red')
       });
       showStatus('Score saved.');
+    } else if (action === 'delete-fighter') {
+      var pid = target.dataset.player;
+      if (!window.confirm('Delete ' + playerName(pid) + '? This cannot be undone.')) return;
+      await api('deletePlayer', { playerId: pid });
+      selectedFighterId = null;
+      showStatus('Fighter deleted.');
     } else if (action === 'save-turn-players') {
       var ids = [];
       document.querySelectorAll('input[type="checkbox"][data-turn="' + turnId + '"]:checked')
@@ -797,6 +1020,38 @@ document.addEventListener('click', function (e) {
   var t = e.target.closest('[data-action]');
   if (!t) return;
   handleAction(t.dataset.action, t);
+});
+
+// Dropdown changes: fighter picker, results turn picker, and the
+// per-ippon type dropdowns that follow an ippon-count change.
+document.addEventListener('change', function (e) {
+  var sel = e.target;
+  if (!sel || sel.tagName !== 'SELECT') return;
+  if (sel.id === 'fighterSelect') {
+    selectedFighterId = sel.value;
+    renderFighters();
+    return;
+  }
+  if (sel.id === 'resultsTurnSelect') {
+    selectedResultsTurnId = sel.value;
+    render();
+    return;
+  }
+  var f = sel.getAttribute('data-f');
+  if (f !== 'whiteIppon' && f !== 'redIppon') return;
+  var card = sel.closest('.match');
+  if (!card) return;
+  var side = f === 'whiteIppon' ? 'white' : 'red';
+  var count = parseInt(sel.value, 10) || 0;
+  var holder = card.querySelector('[data-types="' + side + '"]');
+  if (!holder) return;
+  var kept = [];
+  holder.querySelectorAll('select').forEach(function (s) { kept.push(s.value); });
+  var html = '';
+  for (var i = 0; i < count; i++) {
+    html += '<select data-f="' + side + 'IpponType' + i + '">' + ipponTypeOptions(kept[i] || '') + '</select>';
+  }
+  holder.innerHTML = html;
 });
 
 document.addEventListener('submit', async function (e) {
@@ -872,6 +1127,14 @@ document.getElementById('logoutBtn').addEventListener('click', function () {
 
 document.querySelectorAll('.tab').forEach(function (b) {
   b.addEventListener('click', function () { setTab(b.dataset.tab); });
+});
+
+document.getElementById('toTopBtn').addEventListener('click', function () {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+window.addEventListener('scroll', function () {
+  document.getElementById('toTopBtn').hidden = window.scrollY < 300;
 });
 
 async function restoreSession() {
