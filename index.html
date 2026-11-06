@@ -298,13 +298,6 @@
   .stat { background: var(--panel); border-radius: 6px; padding: 10px 12px; }
   .stat .num { font-size: 22px; font-weight: 700; color: var(--navy); }
   .stat .lbl { font-size: 12px; color: var(--muted); }
-  .types-line {
-    font-size: 13px;
-    color: var(--muted);
-    text-align: center;
-    padding: 6px 12px 10px;
-    border-top: 1px solid var(--line);
-  }
   .to-top {
     position: fixed;
     right: 20px;
@@ -724,14 +717,6 @@ function matchCardHtml(m, turn) {
       '<div class="centre">' + centreInner + '</div>' +
       '<div class="side red">' + redSide + '</div>' +
     '</div>';
-  var wt = (m.whiteIpponTypes || []).filter(function (t) { return t; });
-  var rt = (m.redIpponTypes || []).filter(function (t) { return t; });
-  var typeParts = [];
-  if (wt.length) typeParts.push('White: ' + wt.join(', '));
-  if (rt.length) typeParts.push('Red: ' + rt.join(', '));
-  if (typeParts.length) {
-    html += '<div class="types-line">' + esc(typeParts.join(' · ')) + '</div>';
-  }
   html += '</div>';
   return html;
 }
