@@ -148,6 +148,9 @@
   .turn-date { color: var(--muted); font-size: 14px; margin-top: 2px; }
   .players-line { font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
   .round-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 15px;
     font-weight: 700;
     color: var(--navy);
@@ -155,6 +158,7 @@
     padding-top: 12px;
     border-top: 1px solid var(--line);
   }
+  .round-toggle { min-width: 30px; }
   .match {
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -172,6 +176,7 @@
     font-size: 13px;
     padding: 7px 12px;
   }
+  .meta-right { display: flex; align-items: center; gap: 8px; }
   .pill {
     display: inline-block;
     background: var(--royal);
@@ -200,10 +205,24 @@
   .side.red { background: var(--red-side); color: var(--red-ink); justify-content: flex-start; text-align: left; }
   .centre {
     display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px;
+    background: #e8edf1;
+  }
+  .centre-row {
+    display: flex;
     align-items: center;
     gap: 5px;
-    padding: 0 10px;
   }
+  .centre-types {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+  }
+  .centre-types select { font-size: 13px; padding: 4px 6px; }
   .score { font-size: 21px; font-weight: 700; min-width: 62px; text-align: center; }
   .slot {
     width: 18px;
@@ -215,18 +234,7 @@
   .slot.ippon { color: var(--navy); }
   .slot.hansoku { color: var(--hansoku); }
   .hcount { font-size: 11px; font-weight: 700; vertical-align: super; }
-  .editrow {
-    border-top: 1px solid var(--line);
-    background: #f7fafc;
-    padding: 10px 12px;
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .editrow label { font-size: 13px; color: var(--muted); }
   .hint { font-size: 12px; color: var(--muted); }
-  .editrow select { margin-left: 4px; }
   select, input[type="text"], input[type="date"] {
     padding: 6px 8px;
     border: 1px solid #b9c9d8;
@@ -398,6 +406,8 @@ var editorCreds = null;
 var currentTab = 'schedule';
 var editingTurnDate = null;
 var statusTimer = null;
+var collapsedRounds = {}; // "turnId:round" -> true when that round is collapsed
+var saveTimers = {}; // matchId -> pending auto-save timer
 
 // Seasons: the player list and Elo carry over year to year, but the
 // schedule, results, scoreboard and fighter stats are all for the
@@ -413,12 +423,26 @@ function turnYear(t) {
   return t && t.date ? parseInt(String(t.date).substring(0, 4), 10) : null;
 }
 
+// Seasons offered in the dropdown: the list the server returns (the
+// 2027-2035 range plus any year an editor added), falling back to the
+// built-in range before the first state load.
+function availableSeasons() {
+  if (appState && appState.seasons && appState.seasons.length) return appState.seasons;
+  return SEASONS;
+}
+
 function applySeasonChrome() {
   document.title = 'Dublin Shiai League ' + selectedSeason;
   var footer = document.getElementById('pageFooter');
   if (footer) footer.textContent = 'Dublin Kendo Kobukai · Dublin Shiai League ' + selectedSeason;
   var sel = document.getElementById('seasonSelect');
-  if (sel) sel.value = String(selectedSeason);
+  if (sel) {
+    var list = availableSeasons();
+    sel.innerHTML = list.map(function (y) {
+      return '<option value="' + y + '"' + (y === selectedSeason ? ' selected' : '') + '>' + y + ' season</option>';
+    }).join('');
+    sel.value = String(selectedSeason);
+  }
 }
 
 // Alphabetical by display name ("First Last"), case-insensitive.
@@ -620,15 +644,59 @@ function typeSelectsHtml(m, side) {
   return html;
 }
 
+// Options for the fighter selects in a match card: the turn's competing
+// players, alphabetical, plus the match's current fighter if they are
+// no longer in the turn (so the select always holds its value).
+function matchPlayerOptionsHtml(turn, currentId) {
+  var ids = {};
+  appState.turnPlayers.forEach(function (tp) {
+    if (tp.turnId === turn.id) ids[tp.playerId] = true;
+  });
+  if (currentId) ids[currentId] = true;
+  var players = appState.players.filter(function (p) { return ids[p.id]; }).sort(compareName);
+  return players.map(function (p) {
+    return '<option value="' + esc(p.id) + '"' + (p.id === currentId ? ' selected' : '') + '>' + esc(p.name) + '</option>';
+  }).join('');
+}
+
 function matchCardHtml(m, turn) {
   var meta = esc(turn.name) + ' · Round ' + m.round + ' · Match ' + matchNum(m.id);
   var pill = '<span class="pill' + (m.completed ? '' : ' hidden') + '">Completed</span>';
+  var delBtn = isEditor()
+    ? '<button class="btn small danger" data-action="delete-match" data-match="' + esc(m.id) + '">Delete match</button>'
+    : '';
+  var whiteSide = isEditor()
+    ? '<select data-f="whitePlayer" title="White fighter" aria-label="White fighter">' + matchPlayerOptionsHtml(turn, m.whiteId) + '</select>'
+    : '<span>' + esc(playerName(m.whiteId)) + '</span>';
+  var redSide = isEditor()
+    ? '<select data-f="redPlayer" title="Red fighter" aria-label="Red fighter">' + matchPlayerOptionsHtml(turn, m.redId) + '</select>'
+    : '<span>' + esc(playerName(m.redId)) + '</span>';
+  // Nationals-style centre: the ippon dropdowns sit next to the score and
+  // the hansoku dropdowns sit beside them (hansoku outermost). The centre
+  // is light grey so it reads apart from the white fighter's side. There
+  // is no Save button: changing any dropdown saves the match automatically.
+  var centreInner;
+  if (isEditor()) {
+    centreInner = '<div class="centre-row">' +
+      '<select data-f="whiteHansoku" title="White hansoku" aria-label="White hansoku">' + ipponOptions(m.whiteHansoku) + '</select>' +
+      '<select data-f="whiteIppon" title="White ippon" aria-label="White ippon">' + ipponOptions(m.whiteIppon) + '</select>' +
+      '<span class="score">' + m.whiteIppon + ' - ' + m.redIppon + '</span>' +
+      '<select data-f="redIppon" title="Red ippon" aria-label="Red ippon">' + ipponOptions(m.redIppon) + '</select>' +
+      '<select data-f="redHansoku" title="Red hansoku" aria-label="Red hansoku">' + ipponOptions(m.redHansoku) + '</select>' +
+    '</div>' +
+    '<div class="centre-types">' +
+      '<span data-types="white">' + typeSelectsHtml(m, 'white') + '</span>' +
+      '<span data-types="red">' + typeSelectsHtml(m, 'red') + '</span>' +
+    '</div>';
+  } else {
+    centreInner = '<div class="centre-row">' + centreHtml(m) + '</div>';
+  }
   var html = '<div class="match" data-match="' + esc(m.id) + '">' +
-    '<div class="meta"><span>' + meta + '</span>' + pill + '</div>' +
+    '<div class="meta"><span>' + meta + '</span><span class="meta-right">' + pill + delBtn + '</span></div>' +
     '<div class="fight">' +
-      '<div class="side white"><span>' + esc(playerName(m.whiteId)) + '</span></div>' +
-      '<div class="centre">' + centreHtml(m) + '</div>' +
-      '<div class="side red"><span>' + esc(playerName(m.redId)) + '</span></div>' +
+      '<div class="side white">' + whiteSide + '</div>' +
+      '<div class="centre">' + centreInner + '</div>' +
+      '<div class="side red">' + redSide + '</div>' +
     '</div>';
   var wt = (m.whiteIpponTypes || []).filter(function (t) { return t; });
   var rt = (m.redIpponTypes || []).filter(function (t) { return t; });
@@ -637,18 +705,6 @@ function matchCardHtml(m, turn) {
   if (rt.length) typeParts.push('Red: ' + rt.join(', '));
   if (typeParts.length) {
     html += '<div class="types-line">' + esc(typeParts.join(' · ')) + '</div>';
-  }
-  if (isEditor()) {
-    html += '<div class="editrow">' +
-      '<label>White ippon <select data-f="whiteIppon">' + ipponOptions(m.whiteIppon) + '</select>' +
-      '<span data-types="white">' + typeSelectsHtml(m, 'white') + '</span></label>' +
-      '<label>Red ippon <select data-f="redIppon">' + ipponOptions(m.redIppon) + '</select>' +
-      '<span data-types="red">' + typeSelectsHtml(m, 'red') + '</span></label>' +
-      '<label>White hansoku <select data-f="whiteHansoku">' + ipponOptions(m.whiteHansoku) + '</select></label>' +
-      '<label>Red hansoku <select data-f="redHansoku">' + ipponOptions(m.redHansoku) + '</select></label>' +
-      '<button class="btn small" data-action="save-match" data-match="' + esc(m.id) + '">Save</button>' +
-      '<span class="hint">Hansoku is recorded only. Adjust the ippons manually when a hansoku earns an ippon.</span>' +
-    '</div>';
   }
   html += '</div>';
   return html;
@@ -721,13 +777,20 @@ function turnPanelHtml(t) {
   if (!ms.length) {
     html += '<p class="empty">No matches yet - generate the first round.</p>';
   } else {
-    var currentRound = null;
-    ms.forEach(function (m) {
-      if (m.round !== currentRound) {
-        currentRound = m.round;
-        html += '<div class="round-head">Round ' + m.round + '</div>';
+    // Grouped by round so each round can be collapsed and deleted.
+    var byRound = {};
+    ms.forEach(function (m) { (byRound[m.round] = byRound[m.round] || []).push(m); });
+    Object.keys(byRound).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      var key = t.id + ':' + r;
+      var collapsed = !!collapsedRounds[key];
+      html += '<div class="round-head">' +
+        '<button class="btn small ghost round-toggle" data-action="toggle-round" data-turn="' + esc(t.id) + '" data-round="' + r + '" aria-expanded="' + (!collapsed) + '" aria-label="' + (collapsed ? 'Expand' : 'Collapse') + ' round ' + r + '">' + (collapsed ? '▸' : '▾') + '</button>' +
+        '<span>Round ' + r + '</span>' +
+        (isEditor() ? '<button class="btn small danger" data-action="delete-round" data-turn="' + esc(t.id) + '" data-round="' + r + '">Delete round</button>' : '') +
+      '</div>';
+      if (!collapsed) {
+        byRound[r].forEach(function (m) { html += matchCardHtml(m, t); });
       }
-      html += matchCardHtml(m, t);
     });
   }
   if (isEditor()) html += turnAdminHtml(t);
@@ -750,6 +813,11 @@ function renderResults() {
         '<input type="date" id="ntDate" required>' +
         '<button class="btn" type="submit">Create turn</button>' +
         '<p class="hint">The turn takes its name from its date.</p>' +
+      '</form></div>' +
+      '<div><h3>Add a season</h3><form id="createSeasonForm">' +
+        '<input type="number" id="nsYear" placeholder="Year (e.g. 2036)" min="2000" max="2100" required>' +
+        '<button class="btn" type="submit">Add season</button>' +
+        '<p class="hint">Adds the year to the season dropdown for everyone.</p>' +
       '</form></div>' +
     '</div></div>';
   }
@@ -1021,19 +1089,21 @@ async function handleAction(action, target) {
   var rowIndex = target.dataset.row ? parseInt(target.dataset.row, 10) : null;
   var matchId = target.dataset.match;
   try {
-    if (action === 'save-match') {
-      var card = target.closest('.match');
-      target.disabled = true;
-      await api('recordMatch', {
-        matchId: matchId,
-        whiteIppon: readSelect(card, 'whiteIppon'),
-        redIppon: readSelect(card, 'redIppon'),
-        whiteHansoku: readSelect(card, 'whiteHansoku'),
-        redHansoku: readSelect(card, 'redHansoku'),
-        whiteIpponTypes: readTypeSelects(card, 'white'),
-        redIpponTypes: readTypeSelects(card, 'red')
-      });
-      showStatus('Score saved.');
+    if (action === 'toggle-round') {
+      // Local only: collapse/expand the round, no server call.
+      var rkey = turnId + ':' + (target.dataset.round || '');
+      collapsedRounds[rkey] = !collapsedRounds[rkey];
+      render();
+      return;
+    } else if (action === 'delete-match') {
+      if (!window.confirm('Delete this match? This cannot be undone.')) return;
+      await api('deleteMatch', { matchId: matchId });
+      showStatus('Match deleted.');
+    } else if (action === 'delete-round') {
+      var roundNum = parseInt(target.dataset.round, 10) || 0;
+      if (!window.confirm('Delete Round ' + roundNum + ' (all its matches)? This cannot be undone.')) return;
+      var del = await api('deleteRound', { turnId: turnId, round: roundNum });
+      showStatus('Round ' + roundNum + ' deleted (' + del.deleted + ' match' + (del.deleted === 1 ? '' : 'es') + ').');
     } else if (action === 'delete-fighter') {
       var pid = target.dataset.player;
       if (!window.confirm('Delete ' + playerName(pid) + '? This cannot be undone.')) return;
@@ -1089,8 +1159,64 @@ document.addEventListener('click', function (e) {
   handleAction(t.dataset.action, t);
 });
 
-// Dropdown changes: fighter picker, results turn picker, and the
-// per-ippon type dropdowns that follow an ippon-count change.
+function readPlayerSelect(card, field) {
+  var sel = card.querySelector('select[data-f="' + field + '"]');
+  return sel ? sel.value : '';
+}
+
+// Save the match on this card (ippons, hansoku, types). The result counts
+// toward the scoreboard and Elo as soon as the recorder sets it. No full
+// refresh here: the score is already updated in place, and the 15-second
+// poll picks up the new state without wiping the form the recorder is using.
+async function saveMatchCard(card) {
+  var matchId = card.dataset.match;
+  try {
+    await api('recordMatch', {
+      matchId: matchId,
+      whiteIppon: readSelect(card, 'whiteIppon'),
+      redIppon: readSelect(card, 'redIppon'),
+      whiteHansoku: readSelect(card, 'whiteHansoku'),
+      redHansoku: readSelect(card, 'redHansoku'),
+      whiteIpponTypes: readTypeSelects(card, 'white'),
+      redIpponTypes: readTypeSelects(card, 'red')
+    });
+    showStatus('Score saved.');
+  } catch (err) {
+    showStatus(err.message || 'Could not save the score.', true);
+  }
+}
+
+async function saveMatchPlayers(card) {
+  var matchId = card.dataset.match;
+  try {
+    await api('updateMatchPlayers', {
+      matchId: matchId,
+      whitePlayerId: readPlayerSelect(card, 'whitePlayer'),
+      redPlayerId: readPlayerSelect(card, 'redPlayer')
+    });
+    showStatus('Fighters updated.');
+  } catch (err) {
+    showStatus(err.message || 'Could not update the fighters.', true);
+    // The pairing was rejected (e.g. the same fighter on both sides):
+    // reload the saved state so the selects show the real pairing.
+    await fetchState();
+  }
+}
+
+// Debounce the auto-save so rapid successive changes (e.g. ippon then a
+// type) coalesce into one save with the latest values.
+function scheduleSave(card, kind) {
+  var matchId = card.dataset.match;
+  if (saveTimers[matchId]) clearTimeout(saveTimers[matchId]);
+  saveTimers[matchId] = setTimeout(function () {
+    delete saveTimers[matchId];
+    if (kind === 'players') saveMatchPlayers(card);
+    else saveMatchCard(card);
+  }, 400);
+}
+
+// Dropdown changes: fighter picker, results turn picker, season picker,
+// and the match-card dropdowns, which save automatically.
 document.addEventListener('change', function (e) {
   var sel = e.target;
   if (!sel || sel.tagName !== 'SELECT') return;
@@ -1112,20 +1238,38 @@ document.addEventListener('change', function (e) {
     return;
   }
   var f = sel.getAttribute('data-f');
-  if (f !== 'whiteIppon' && f !== 'redIppon') return;
   var card = sel.closest('.match');
   if (!card) return;
-  var side = f === 'whiteIppon' ? 'white' : 'red';
-  var count = parseInt(sel.value, 10) || 0;
-  var holder = card.querySelector('[data-types="' + side + '"]');
-  if (!holder) return;
-  var kept = [];
-  holder.querySelectorAll('select').forEach(function (s) { kept.push(s.value); });
-  var html = '';
-  for (var i = 0; i < count; i++) {
-    html += '<select data-f="' + side + 'IpponType' + i + '">' + ipponTypeOptions(kept[i] || '') + '</select>';
+  // Ippon count changed: rebuild the type dropdowns and keep the centre
+  // score in step with the dropdowns, then save.
+  if (f === 'whiteIppon' || f === 'redIppon') {
+    var side = f === 'whiteIppon' ? 'white' : 'red';
+    var count = parseInt(sel.value, 10) || 0;
+    var holder = card.querySelector('[data-types="' + side + '"]');
+    if (holder) {
+      var kept = [];
+      holder.querySelectorAll('select').forEach(function (s) { kept.push(s.value); });
+      var html = '';
+      for (var i = 0; i < count; i++) {
+        html += '<select data-f="' + side + 'IpponType' + i + '">' + ipponTypeOptions(kept[i] || '') + '</select>';
+      }
+      holder.innerHTML = html;
+    }
+    var score = card.querySelector('.score');
+    if (score) score.textContent = readSelect(card, 'whiteIppon') + ' - ' + readSelect(card, 'redIppon');
+    scheduleSave(card, 'result');
+    return;
   }
-  holder.innerHTML = html;
+  // Hansoku or an ippon type changed: save the match as-is.
+  if (f === 'whiteHansoku' || f === 'redHansoku' || f.indexOf('IpponType') !== -1) {
+    scheduleSave(card, 'result');
+    return;
+  }
+  // A fighter changed: save the new pairing.
+  if (f === 'whitePlayer' || f === 'redPlayer') {
+    scheduleSave(card, 'players');
+    return;
+  }
 });
 
 document.addEventListener('submit', async function (e) {
@@ -1150,7 +1294,7 @@ document.addEventListener('submit', async function (e) {
       // A turn belongs to the year of its date: switch the view to
       // that season so the turn just created is visible.
       var y = parseInt(String(tdate).substring(0, 4), 10);
-      if (y && SEASONS.indexOf(y) >= 0 && y !== selectedSeason) {
+      if (y && availableSeasons().indexOf(y) >= 0 && y !== selectedSeason) {
         selectedSeason = y;
         try { localStorage.setItem('dsl_season', String(y)); } catch (err) {}
         selectedResultsTurnId = null;
@@ -1159,6 +1303,20 @@ document.addEventListener('submit', async function (e) {
       await fetchState();
     } catch (err) {
       showStatus(err.message || 'Could not create the turn.', true);
+    }
+  } else if (e.target.id === 'createSeasonForm') {
+    e.preventDefault();
+    var nsYear = parseInt(document.getElementById('nsYear').value, 10);
+    if (!nsYear) return;
+    try {
+      await api('addSeason', { year: nsYear });
+      selectedSeason = nsYear;
+      try { localStorage.setItem('dsl_season', String(nsYear)); } catch (err) {}
+      selectedResultsTurnId = null;
+      showStatus(nsYear + ' season added.');
+      await fetchState();
+    } catch (err) {
+      showStatus(err.message || 'Could not add the season.', true);
     }
   } else if (e.target.id === 'loginForm') {
     e.preventDefault();
