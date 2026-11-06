@@ -38,7 +38,6 @@
   }
   header h1 { margin: 0; font-size: 28px; line-height: 1.2; }
   header .season { margin: 2px 0 0; font-size: 16px; color: #bcd3e8; }
-  header .club { margin: 2px 0 0; font-size: 14px; color: #8fb0cf; }
   .head-right { text-align: right; flex-shrink: 0; }
   #loginState { display: block; font-size: 13px; color: #bcd3e8; margin-bottom: 6px; }
   nav.tabs {
@@ -294,7 +293,6 @@
     <div>
       <h1>Dublin Shiai League</h1>
       <p class="season">2027 season</p>
-      <p class="club">Dublin Kendo Kobukai</p>
     </div>
     <div class="head-right">
       <span id="loginState"></span>
@@ -343,7 +341,7 @@ const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxLDxB_UVzAxepjPToFO
 var appState = null;
 var editorCreds = null;
 var currentTab = 'schedule';
-var editingScheduleRow = null;
+var editingTurnDate = null;
 var statusTimer = null;
 
 function esc(s) {
@@ -451,35 +449,33 @@ function updateAuthUI() {
 function renderSchedule() {
   var el = document.getElementById('tab-schedule');
   if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
-  var rows = appState.schedule.slice().sort(function (a, b) {
+  // The schedule IS the turns: each turn takes its name from its date.
+  var turns = appState.turns.slice().sort(function (a, b) {
     return (a.date || '').localeCompare(b.date || '');
   });
-  if (!rows.length) {
+  if (!turns.length) {
     el.innerHTML = '<div class="panel"><p class="empty">No league dates yet.</p></div>';
     return;
   }
   var html = '<div class="panel"><h2>League dates</h2>';
-  rows.forEach(function (r) {
-    var badge = r.status === 'Confirmed' ? 'confirmed' : 'provisional';
+  turns.forEach(function (t) {
     html += '<div class="sched-row">' +
-      '<span class="sched-date">' + esc(fmtDate(r.date)) + '</span>' +
-      '<span class="sched-label">' + esc(r.label) + '</span>' +
-      '<span class="badge ' + badge + '">' + esc(r.status) + '</span>';
-    if (r.notes) html += '<span class="sched-notes">' + esc(r.notes) + '</span>';
+      '<span class="sched-date">' + esc(t.name) + '</span>';
+    if (t.playerCount > 0) {
+      html += '<span class="sched-label">' + t.playerCount + (t.playerCount === 1 ? ' player' : ' players') + '</span>';
+    }
+    if (t.fightingSpiritName) {
+      html += '<span class="sched-notes">Fighting Spirit: ' + esc(t.fightingSpiritName) + '</span>';
+    }
     if (isEditor()) {
-      if (editingScheduleRow === r.rowIndex) {
+      if (editingTurnDate === t.id) {
         html += '<div class="sched-edit">' +
-          '<input type="date" id="se-date-' + r.rowIndex + '" value="' + esc(r.date) + '">' +
-          '<input type="text" id="se-label-' + r.rowIndex + '" value="' + esc(r.label) + '" placeholder="Label">' +
-          '<select id="se-status-' + r.rowIndex + '">' +
-            '<option value="Provisional"' + (r.status === 'Provisional' ? ' selected' : '') + '>Provisional</option>' +
-            '<option value="Confirmed"' + (r.status === 'Confirmed' ? ' selected' : '') + '>Confirmed</option>' +
-          '</select>' +
-          '<button class="btn small" data-action="save-schedule" data-row="' + r.rowIndex + '">Save</button>' +
-          '<button class="btn small ghost" data-action="cancel-schedule">Cancel</button>' +
+          '<input type="date" id="te-date-' + esc(t.id) + '" value="' + esc(t.date) + '">' +
+          '<button class="btn small" data-action="save-turn-date" data-turn="' + esc(t.id) + '">Save</button>' +
+          '<button class="btn small ghost" data-action="cancel-turn-date">Cancel</button>' +
         '</div>';
       } else {
-        html += '<button class="btn small ghost" data-action="edit-schedule" data-row="' + r.rowIndex + '">Edit</button>';
+        html += '<button class="btn small ghost" data-action="edit-turn-date" data-turn="' + esc(t.id) + '">Edit date</button>';
       }
     }
     html += '</div>';
@@ -558,8 +554,7 @@ function turnAdminHtml(t) {
   var html = '<div class="turn-admin"><h3>Competing players</h3><div class="plist">';
   appState.players.forEach(function (p) {
     html += '<label><input type="checkbox" data-turn="' + esc(t.id) + '" value="' + esc(p.id) + '"' +
-      (selected[p.id] ? ' checked' : '') + '> ' + esc(p.name) +
-      (p.club ? ' (' + esc(p.club) + ')' : '') + '</label>';
+      (selected[p.id] ? ' checked' : '') + '> ' + esc(p.name) + '</label>';
   });
   if (!appState.players.length) html += '<span class="empty">No players yet. Add a player above first.</span>';
   html += '</div><div class="btnrow">' +
@@ -572,7 +567,21 @@ function turnAdminHtml(t) {
     '</select>' +
     '<button class="btn" data-action="set-status" data-turn="' + esc(t.id) + '">Update status</button>' +
     '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">Mark complete</button>' +
-  '</div></div>';
+  '</div>';
+  var competing = appState.players.filter(function (p) { return selected[p.id]; });
+  html += '<h3>Fighting Spirit award</h3><div class="btnrow">';
+  if (!competing.length) {
+    html += '<span class="empty">Select the competing players above first.</span>';
+  } else {
+    html += '<select id="fs-' + esc(t.id) + '">' +
+      '<option value="">No winner yet</option>' +
+      competing.map(function (p) {
+        return '<option value="' + esc(p.id) + '"' + (t.fightingSpirit === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>';
+      }).join('') +
+    '</select>' +
+    '<button class="btn" data-action="save-fighting-spirit" data-turn="' + esc(t.id) + '">Save winner</button>';
+  }
+  html += '</div></div>';
   return html;
 }
 
@@ -583,14 +592,14 @@ function renderResults() {
   if (isEditor()) {
     html += '<div class="panel"><h2>Editor panel</h2><div class="admin-grid">' +
       '<div><h3>Add a player</h3><form id="createPlayerForm">' +
-        '<input type="text" id="npName" placeholder="Name" required>' +
-        '<input type="text" id="npClub" placeholder="Club (optional)">' +
+        '<input type="text" id="npFirst" placeholder="First name" required>' +
+        '<input type="text" id="npLast" placeholder="Last name" required>' +
         '<button class="btn" type="submit">Add player</button>' +
       '</form></div>' +
       '<div><h3>Create a turn</h3><form id="createTurnForm">' +
-        '<input type="text" id="ntName" placeholder="Turn name, e.g. Turn 1" required>' +
         '<input type="date" id="ntDate" required>' +
         '<button class="btn" type="submit">Create turn</button>' +
+        '<p class="hint">The turn takes its name from its date.</p>' +
       '</form></div>' +
     '</div></div>';
   }
@@ -607,9 +616,12 @@ function renderResults() {
   }
   turns.forEach(function (t) {
     var badge = t.status === 'Active' ? 'active' : (t.status === 'Complete' ? 'complete' : 'upcoming');
+    var meta = [];
+    if (t.playerCount > 0) meta.push(t.playerCount + (t.playerCount === 1 ? ' player' : ' players'));
+    if (t.fightingSpiritName) meta.push('Fighting Spirit: ' + t.fightingSpiritName);
     html += '<div class="panel"><div class="turn-head"><div>' +
       '<h2>' + esc(t.name) + '</h2>' +
-      '<div class="turn-date">' + esc(fmtDate(t.date)) + '</div>' +
+      (meta.length ? '<div class="turn-date">' + esc(meta.join(' · ')) + '</div>' : '') +
       '</div><span class="badge ' + badge + '">' + esc(t.status) + '</span></div>';
     html += turnPlayersHtml(t.id);
     var ms = appState.matches
@@ -754,21 +766,23 @@ async function handleAction(action, target) {
     } else if (action === 'mark-complete') {
       await api('setTurnStatus', { turnId: turnId, status: 'Complete' });
       showStatus('Turn marked complete.');
-    } else if (action === 'edit-schedule') {
-      editingScheduleRow = rowIndex;
+    } else if (action === 'save-fighting-spirit') {
+      var fsSel = document.getElementById('fs-' + turnId);
+      await api('setFightingSpirit', { turnId: turnId, playerId: fsSel ? fsSel.value : '' });
+      showStatus('Fighting Spirit winner saved.');
+    } else if (action === 'edit-turn-date') {
+      editingTurnDate = turnId;
       render();
       return;
-    } else if (action === 'cancel-schedule') {
-      editingScheduleRow = null;
+    } else if (action === 'cancel-turn-date') {
+      editingTurnDate = null;
       render();
       return;
-    } else if (action === 'save-schedule') {
-      var date = document.getElementById('se-date-' + rowIndex).value;
-      var label = document.getElementById('se-label-' + rowIndex).value;
-      var status = document.getElementById('se-status-' + rowIndex).value;
-      await api('updateSchedule', { rowIndex: rowIndex, date: date, label: label, status: status });
-      editingScheduleRow = null;
-      showStatus('Schedule updated.');
+    } else if (action === 'save-turn-date') {
+      var newDate = document.getElementById('te-date-' + turnId).value;
+      await api('updateTurnDate', { turnId: turnId, date: newDate });
+      editingTurnDate = null;
+      showStatus('Turn date updated.');
     } else {
       return;
     }
@@ -788,11 +802,11 @@ document.addEventListener('click', function (e) {
 document.addEventListener('submit', async function (e) {
   if (e.target.id === 'createPlayerForm') {
     e.preventDefault();
-    var name = document.getElementById('npName').value.trim();
-    var club = document.getElementById('npClub').value.trim();
-    if (!name) return;
+    var firstName = document.getElementById('npFirst').value.trim();
+    var lastName = document.getElementById('npLast').value.trim();
+    if (!firstName || !lastName) return;
     try {
-      await api('createPlayer', { name: name, club: club });
+      await api('createPlayer', { firstName: firstName, lastName: lastName });
       showStatus('Player added.');
       await fetchState();
     } catch (err) {
@@ -800,11 +814,10 @@ document.addEventListener('submit', async function (e) {
     }
   } else if (e.target.id === 'createTurnForm') {
     e.preventDefault();
-    var tname = document.getElementById('ntName').value.trim();
     var tdate = document.getElementById('ntDate').value;
-    if (!tname || !tdate) return;
+    if (!tdate) return;
     try {
-      await api('createTurn', { name: tname, date: tdate });
+      await api('createTurn', { date: tdate });
       showStatus('Turn created.');
       await fetchState();
     } catch (err) {
@@ -891,7 +904,7 @@ setInterval(function () {
   // Do not wipe a form the editor is using.
   var active = document.activeElement;
   if (active && (active.tagName === 'SELECT' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-  if (editingScheduleRow !== null) return;
+  if (editingTurnDate !== null) return;
   if (!document.getElementById('loginModal').hidden) return;
   fetchState();
 }, 15000);
