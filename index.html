@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dublin Shiai League 2027</title>
+<style>
+  :root {
+    --navy: #16365c;
+    --royal: #1f4e79;
+    --royal-light: #2e6da4;
+    --ink: #1a2a3a;
+    --muted: #5b7a99;
+    --panel: #eef3f8;
+    --line: #dbe7f3;
+    --bg: #f4f7fb;
+    --red-side: #fdeeee;
+    --red-ink: #7a1f1f;
+    --hansoku: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.45;
+  }
+  header { background: var(--navy); color: #fff; }
+  .head-inner {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 20px 16px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+  header .season { margin: 2px 0 0; font-size: 16px; color: #bcd3e8; }
+  header .club { margin: 2px 0 0; font-size: 14px; color: #8fb0cf; }
+  .head-right { text-align: right; flex-shrink: 0; }
+  #loginState { display: block; font-size: 13px; color: #bcd3e8; margin-bottom: 6px; }
+  nav.tabs {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 16px;
+    display: flex;
+    gap: 4px;
+  }
+  .tab {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: #bcd3e8;
+    font-size: 16px;
+    padding: 10px 18px;
+    cursor: pointer;
+  }
+  .tab:hover { color: #fff; }
+  .tab.active { color: #fff; border-bottom-color: #fff; font-weight: 700; }
+  main { max-width: 920px; margin: 0 auto; padding: 16px; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 28px 16px 32px;
+  }
+  .btn {
+    background: var(--royal);
+    color: #fff;
+    border: 1px solid var(--royal);
+    border-radius: 4px;
+    padding: 8px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--royal-light); }
+  .btn.light {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.55);
+  }
+  .btn.light:hover { background: rgba(255, 255, 255, 0.25); }
+  .btn.ghost { background: #fff; color: var(--royal); }
+  .btn.small { padding: 5px 10px; font-size: 13px; }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+  .status {
+    background: #e3eefb;
+    color: var(--navy);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 14px;
+  }
+  .status.error { background: #fdeeee; color: var(--red-ink); }
+  .panel {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel h2 { margin: 0 0 10px; font-size: 19px; color: var(--navy); }
+  .panel h3 { margin: 14px 0 8px; font-size: 15px; color: var(--navy); }
+  .panel p { margin: 6px 0; }
+  .empty { color: var(--muted); }
+  /* Schedule */
+  .sched-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .sched-row:last-child { border-bottom: none; }
+  .sched-date { font-weight: 700; min-width: 150px; color: var(--navy); }
+  .sched-label { flex: 1; min-width: 120px; }
+  .sched-notes { color: var(--muted); font-size: 13px; width: 100%; }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+  .badge.provisional { background: #e3eefb; color: var(--royal); border: 1px solid var(--royal); }
+  .badge.confirmed { background: var(--royal); color: #fff; }
+  .badge.upcoming { background: #e3eefb; color: var(--royal); }
+  .badge.active { background: var(--royal); color: #fff; }
+  .badge.complete { background: #e8edf1; color: var(--muted); }
+  .sched-edit { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; width: 100%; }
+  .sched-edit input, .sched-edit select { padding: 6px 8px; }
+  /* Turns and matches */
+  .turn-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .turn-head h2 { margin: 0; }
+  .turn-date { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .players-line { font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+  .round-head {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 18px 0 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .match {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 13px;
+    padding: 7px 12px;
+  }
+  .pill {
+    display: inline-block;
+    background: var(--royal);
+    color: #fff;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .pill.hidden { visibility: hidden; }
+  .fight {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: stretch;
+    min-height: 62px;
+  }
+  .side {
+    display: flex;
+    align-items: center;
+    padding: 12px 14px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .side.white { background: #fff; justify-content: flex-end; text-align: right; }
+  .side.red { background: var(--red-side); color: var(--red-ink); justify-content: flex-start; text-align: left; }
+  .centre {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 10px;
+  }
+  .score { font-size: 21px; font-weight: 700; min-width: 62px; text-align: center; }
+  .slot {
+    width: 18px;
+    text-align: center;
+    font-size: 15px;
+    visibility: hidden;
+  }
+  .slot.on { visibility: visible; }
+  .slot.ippon { color: var(--navy); }
+  .slot.hansoku { color: var(--hansoku); }
+  .hcount { font-size: 11px; font-weight: 700; vertical-align: super; }
+  .editrow {
+    border-top: 1px solid var(--line);
+    background: #f7fafc;
+    padding: 10px 12px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .editrow label { font-size: 13px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); }
+  .editrow select { margin-left: 4px; }
+  select, input[type="text"], input[type="date"] {
+    padding: 6px 8px;
+    border: 1px solid #b9c9d8;
+    border-radius: 4px;
+    font-size: 14px;
+    background: #fff;
+  }
+  /* Admin */
+  .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 640px) { .admin-grid { grid-template-columns: 1fr; } }
+  .admin-grid form { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .admin-grid input { width: 100%; }
+  .turn-admin {
+    border-top: 1px solid var(--line);
+    margin-top: 14px;
+    padding-top: 6px;
+  }
+  .plist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin: 6px 0 12px;
+  }
+  .plist label { font-size: 14px; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btnrow select { padding: 6px 8px; }
+  /* Scoreboard */
+  table.scoreboard { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.scoreboard th {
+    background: var(--navy);
+    color: #fff;
+    text-align: right;
+    padding: 9px 8px;
+    white-space: nowrap;
+  }
+  table.scoreboard th:first-child, table.scoreboard td:first-child { text-align: center; }
+  table.scoreboard th:nth-child(2), table.scoreboard td:nth-child(2) { text-align: left; }
+  table.scoreboard td { padding: 8px; text-align: right; border-bottom: 1px solid var(--line); }
+  table.scoreboard tr:nth-child(even) td { background: var(--bg); }
+  .updated { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  /* Login modal */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(22, 54, 92, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 10;
+  }
+  .modal-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 22px;
+    width: 100%;
+    max-width: 360px;
+  }
+  .modal-card h2 { margin: 0 0 12px; color: var(--navy); font-size: 20px; }
+  .modal-card form { display: flex; flex-direction: column; gap: 10px; }
+  .modal-card label { font-size: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .error { color: var(--red-ink); font-size: 14px; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="head-inner">
+    <div>
+      <h1>Dublin Shiai League</h1>
+      <p class="season">2027 season</p>
+      <p class="club">Dublin Kendo Kobukai</p>
+    </div>
+    <div class="head-right">
+      <span id="loginState"></span>
+      <button id="loginBtn" class="btn light">Editor login</button>
+      <button id="logoutBtn" class="btn light" hidden>Log out</button>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="schedule">Schedule</button>
+    <button class="tab" data-tab="results">Results</button>
+    <button class="tab" data-tab="scoreboard">Scoreboard</button>
+  </nav>
+</header>
+
+<main>
+  <div id="statusLine" class="status" hidden></div>
+  <section id="tab-schedule" class="tabpage"></section>
+  <section id="tab-results" class="tabpage" hidden></section>
+  <section id="tab-scoreboard" class="tabpage" hidden></section>
+</main>
+
+<footer>Dublin Kendo Kobukai · Dublin Shiai League 2027</footer>
+
+<div id="loginModal" class="modal" hidden>
+  <div class="modal-card">
+    <h2>Editor login</h2>
+    <form id="loginForm">
+      <label>Username
+        <input id="loginUser" type="text" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input id="loginPass" type="password" autocomplete="current-password" required>
+      </label>
+      <p id="loginError" class="error" hidden></p>
+      <div>
+        <button class="btn" type="submit">Log in</button>
+        <button class="btn ghost" type="button" id="loginCancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxLDxB_UVzAxepjPToFO78-atoZZcFGfbSZX0bzr6IOyAuXZNuAfqkPpeO6lrSDYZWO/exec";
+
+var appState = null;
+var editorCreds = null;
+var currentTab = 'schedule';
+var editingScheduleRow = null;
+var statusTimer = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function isEditor() {
+  return !!editorCreds;
+}
+
+function showStatus(msg, isError) {
+  var el = document.getElementById('statusLine');
+  el.textContent = msg;
+  el.classList.toggle('error', !!isError);
+  el.hidden = false;
+  if (statusTimer) clearTimeout(statusTimer);
+  statusTimer = setTimeout(function () { el.hidden = true; }, 6000);
+}
+
+// '2027-01-29' -> 'Fri 29 Jan 2027'. Parsed as a local date to avoid shifts.
+function fmtDate(iso) {
+  if (!iso) return 'Date to be confirmed';
+  var parts = String(iso).split('-');
+  if (parts.length !== 3) return iso;
+  var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function matchNum(matchId) {
+  var m = /-M(\d+)$/.exec(matchId || '');
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function playerById(id) {
+  if (!appState) return null;
+  for (var i = 0; i < appState.players.length; i++) {
+    if (appState.players[i].id === id) return appState.players[i];
+  }
+  return null;
+}
+
+function playerName(id) {
+  var p = playerById(id);
+  return p ? p.name : 'Unknown player';
+}
+
+/* ---------- data access ---------- */
+
+async function fetchState() {
+  if (!WEBAPP_URL) {
+    showStatus('Add the Apps Script web app URL to WEBAPP_URL in index.html.', true);
+    return;
+  }
+  try {
+    var res = await fetch(WEBAPP_URL + '?action=getState');
+    var data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not load the league data.');
+    appState = data;
+    render();
+  } catch (err) {
+    showStatus('Could not load the league data. Please try again later.', true);
+  }
+}
+
+async function api(action, payload) {
+  var body = { action: action };
+  if (editorCreds) {
+    body.username = editorCreds.username;
+    body.password = editorCreds.password;
+  }
+  if (payload) {
+    for (var k in payload) body[k] = payload[k];
+  }
+  var res = await fetch(WEBAPP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(body)
+  });
+  var data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Request failed.');
+  return data;
+}
+
+/* ---------- rendering ---------- */
+
+function render() {
+  var y = window.scrollY;
+  renderSchedule();
+  renderResults();
+  renderScoreboard();
+  updateAuthUI();
+  window.scrollTo(0, y);
+}
+
+function updateAuthUI() {
+  document.getElementById('loginBtn').hidden = isEditor();
+  document.getElementById('logoutBtn').hidden = !isEditor();
+  document.getElementById('loginState').textContent =
+    isEditor() ? 'Logged in as ' + editorCreds.username : '';
+}
+
+function renderSchedule() {
+  var el = document.getElementById('tab-schedule');
+  if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
+  var rows = appState.schedule.slice().sort(function (a, b) {
+    return (a.date || '').localeCompare(b.date || '');
+  });
+  if (!rows.length) {
+    el.innerHTML = '<div class="panel"><p class="empty">No league dates yet.</p></div>';
+    return;
+  }
+  var html = '<div class="panel"><h2>League dates</h2>';
+  rows.forEach(function (r) {
+    var badge = r.status === 'Confirmed' ? 'confirmed' : 'provisional';
+    html += '<div class="sched-row">' +
+      '<span class="sched-date">' + esc(fmtDate(r.date)) + '</span>' +
+      '<span class="sched-label">' + esc(r.label) + '</span>' +
+      '<span class="badge ' + badge + '">' + esc(r.status) + '</span>';
+    if (r.notes) html += '<span class="sched-notes">' + esc(r.notes) + '</span>';
+    if (isEditor()) {
+      if (editingScheduleRow === r.rowIndex) {
+        html += '<div class="sched-edit">' +
+          '<input type="date" id="se-date-' + r.rowIndex + '" value="' + esc(r.date) + '">' +
+          '<input type="text" id="se-label-' + r.rowIndex + '" value="' + esc(r.label) + '" placeholder="Label">' +
+          '<select id="se-status-' + r.rowIndex + '">' +
+            '<option value="Provisional"' + (r.status === 'Provisional' ? ' selected' : '') + '>Provisional</option>' +
+            '<option value="Confirmed"' + (r.status === 'Confirmed' ? ' selected' : '') + '>Confirmed</option>' +
+          '</select>' +
+          '<button class="btn small" data-action="save-schedule" data-row="' + r.rowIndex + '">Save</button>' +
+          '<button class="btn small ghost" data-action="cancel-schedule">Cancel</button>' +
+        '</div>';
+      } else {
+        html += '<button class="btn small ghost" data-action="edit-schedule" data-row="' + r.rowIndex + '">Edit</button>';
+      }
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function ipponSlot(count, n) {
+  return '<span class="slot ippon' + (count >= n ? ' on' : '') + '">●</span>';
+}
+
+function hansokuSlot(count) {
+  if (count <= 0) return '<span class="slot hansoku">▲</span>';
+  return '<span class="slot hansoku on">▲' + (count > 1 ? '<span class="hcount">' + count + '</span>' : '') + '</span>';
+}
+
+function centreHtml(m) {
+  // Outside to inside: hansoku, first ippon, second ippon, score, second ippon, first ippon, hansoku.
+  return hansokuSlot(m.whiteHansoku) +
+    ipponSlot(m.whiteIppon, 1) + ipponSlot(m.whiteIppon, 2) +
+    '<span class="score">' + m.whiteIppon + ' - ' + m.redIppon + '</span>' +
+    ipponSlot(m.redIppon, 2) + ipponSlot(m.redIppon, 1) +
+    hansokuSlot(m.redHansoku);
+}
+
+function ipponOptions(v) {
+  var html = '';
+  [0, 1, 2].forEach(function (n) {
+    html += '<option value="' + n + '"' + (v === n ? ' selected' : '') + '>' + n + '</option>';
+  });
+  return html;
+}
+
+function matchCardHtml(m, turn) {
+  var meta = esc(turn.name) + ' · Round ' + m.round + ' · Match ' + matchNum(m.id);
+  var pill = '<span class="pill' + (m.completed ? '' : ' hidden') + '">Completed</span>';
+  var html = '<div class="match" data-match="' + esc(m.id) + '">' +
+    '<div class="meta"><span>' + meta + '</span>' + pill + '</div>' +
+    '<div class="fight">' +
+      '<div class="side white"><span>' + esc(playerName(m.whiteId)) + '</span></div>' +
+      '<div class="centre">' + centreHtml(m) + '</div>' +
+      '<div class="side red"><span>' + esc(playerName(m.redId)) + '</span></div>' +
+    '</div>';
+  if (isEditor()) {
+    html += '<div class="editrow">' +
+      '<label>White ippon <select data-f="whiteIppon">' + ipponOptions(m.whiteIppon) + '</select></label>' +
+      '<label>Red ippon <select data-f="redIppon">' + ipponOptions(m.redIppon) + '</select></label>' +
+      '<label>White hansoku <select data-f="whiteHansoku">' + ipponOptions(m.whiteHansoku) + '</select></label>' +
+      '<label>Red hansoku <select data-f="redHansoku">' + ipponOptions(m.redHansoku) + '</select></label>' +
+      '<button class="btn small" data-action="save-match" data-match="' + esc(m.id) + '">Save</button>' +
+      '<span class="hint">Hansoku is recorded only. Adjust the ippons manually when a hansoku earns an ippon.</span>' +
+    '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function turnPlayersHtml(turnId) {
+  var ids = appState.turnPlayers
+    .filter(function (tp) { return tp.turnId === turnId; })
+    .map(function (tp) { return tp.playerId; });
+  if (!ids.length) return '<p class="players-line">No players selected for this turn yet.</p>';
+  var names = ids.map(function (id) {
+    var p = playerById(id);
+    return p ? esc(p.name) : 'Unknown player';
+  });
+  return '<p class="players-line">Competing: ' + names.join(', ') + '</p>';
+}
+
+function turnAdminHtml(t) {
+  var selected = {};
+  appState.turnPlayers.forEach(function (tp) {
+    if (tp.turnId === t.id) selected[tp.playerId] = true;
+  });
+  var html = '<div class="turn-admin"><h3>Competing players</h3><div class="plist">';
+  appState.players.forEach(function (p) {
+    html += '<label><input type="checkbox" data-turn="' + esc(t.id) + '" value="' + esc(p.id) + '"' +
+      (selected[p.id] ? ' checked' : '') + '> ' + esc(p.name) +
+      (p.club ? ' (' + esc(p.club) + ')' : '') + '</label>';
+  });
+  if (!appState.players.length) html += '<span class="empty">No players yet. Add a player above first.</span>';
+  html += '</div><div class="btnrow">' +
+    '<button class="btn" data-action="save-turn-players" data-turn="' + esc(t.id) + '">Save players</button>' +
+    '<button class="btn" data-action="generate-round" data-turn="' + esc(t.id) + '">Generate next round</button>' +
+    '<select id="status-' + esc(t.id) + '">' +
+      ['Upcoming', 'Active', 'Complete'].map(function (s) {
+        return '<option value="' + s + '"' + (t.status === s ? ' selected' : '') + '>' + s + '</option>';
+      }).join('') +
+    '</select>' +
+    '<button class="btn" data-action="set-status" data-turn="' + esc(t.id) + '">Update status</button>' +
+    '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">Mark complete</button>' +
+  '</div></div>';
+  return html;
+}
+
+function renderResults() {
+  var el = document.getElementById('tab-results');
+  if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
+  var html = '';
+  if (isEditor()) {
+    html += '<div class="panel"><h2>Editor panel</h2><div class="admin-grid">' +
+      '<div><h3>Add a player</h3><form id="createPlayerForm">' +
+        '<input type="text" id="npName" placeholder="Name" required>' +
+        '<input type="text" id="npClub" placeholder="Club (optional)">' +
+        '<button class="btn" type="submit">Add player</button>' +
+      '</form></div>' +
+      '<div><h3>Create a turn</h3><form id="createTurnForm">' +
+        '<input type="text" id="ntName" placeholder="Turn name, e.g. Turn 1" required>' +
+        '<input type="date" id="ntDate" required>' +
+        '<button class="btn" type="submit">Create turn</button>' +
+      '</form></div>' +
+    '</div></div>';
+  }
+  var turns = appState.turns.slice().sort(function (a, b) {
+    var aA = a.status === 'Active' ? 0 : 1;
+    var bA = b.status === 'Active' ? 0 : 1;
+    if (aA !== bA) return aA - bA;
+    return (b.date || '').localeCompare(a.date || '');
+  });
+  if (!turns.length) {
+    html += '<div class="panel"><p class="empty">No turns yet - create the first turn to get started.</p></div>';
+    el.innerHTML = html;
+    return;
+  }
+  turns.forEach(function (t) {
+    var badge = t.status === 'Active' ? 'active' : (t.status === 'Complete' ? 'complete' : 'upcoming');
+    html += '<div class="panel"><div class="turn-head"><div>' +
+      '<h2>' + esc(t.name) + '</h2>' +
+      '<div class="turn-date">' + esc(fmtDate(t.date)) + '</div>' +
+      '</div><span class="badge ' + badge + '">' + esc(t.status) + '</span></div>';
+    html += turnPlayersHtml(t.id);
+    var ms = appState.matches
+      .filter(function (m) { return m.turnId === t.id; })
+      .sort(function (a, b) {
+        if (a.round !== b.round) return a.round - b.round;
+        return matchNum(a.id) - matchNum(b.id);
+      });
+    if (!ms.length) {
+      html += '<p class="empty">No matches yet - generate the first round.</p>';
+    } else {
+      var currentRound = null;
+      ms.forEach(function (m) {
+        if (m.round !== currentRound) {
+          currentRound = m.round;
+          html += '<div class="round-head">Round ' + m.round + '</div>';
+        }
+        html += matchCardHtml(m, t);
+      });
+    }
+    if (isEditor()) html += turnAdminHtml(t);
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function scoreboardRows() {
+  var s = appState.settings;
+  var rows = appState.players.map(function (p) {
+    return {
+      id: p.id, name: p.name, elo: p.elo,
+      played: 0, won: 0, drawn: 0, lost: 0, ipFor: 0, ipAgainst: 0, points: 0
+    };
+  });
+  var byId = {};
+  rows.forEach(function (r) { byId[r.id] = r; });
+  appState.matches.forEach(function (m) {
+    if (!m.completed) return;
+    var w = byId[m.whiteId];
+    var r = byId[m.redId];
+    if (!w || !r) return;
+    w.played++;
+    r.played++;
+    w.ipFor += m.whiteIppon;
+    w.ipAgainst += m.redIppon;
+    r.ipFor += m.redIppon;
+    r.ipAgainst += m.whiteIppon;
+    if (m.result === 'White') {
+      w.won++; r.lost++;
+      w.points += s.winPoints; r.points += s.lossPoints;
+    } else if (m.result === 'Red') {
+      r.won++; w.lost++;
+      r.points += s.winPoints; w.points += s.lossPoints;
+    } else if (m.result === 'Draw') {
+      w.drawn++; r.drawn++;
+      w.points += s.drawPoints; r.points += s.drawPoints;
+    }
+  });
+  rows.sort(function (a, b) {
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.ipFor !== a.ipFor) return b.ipFor - a.ipFor;
+    if (b.elo !== a.elo) return b.elo - a.elo;
+    return a.name.localeCompare(b.name);
+  });
+  return rows;
+}
+
+function renderScoreboard() {
+  var el = document.getElementById('tab-scoreboard');
+  if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
+  var rows = scoreboardRows();
+  var html = '<div class="panel"><h2>Scoreboard</h2>';
+  if (!rows.length) {
+    html += '<p class="empty">No players yet - add a player to get started.</p>';
+  } else {
+    html += '<table class="scoreboard"><thead><tr>' +
+      '<th>Rank</th><th>Name</th><th>Elo</th><th>Played</th><th>Won</th><th>Drawn</th><th>Lost</th>' +
+      '<th>Ippon For</th><th>Ippon Against</th><th>Points</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(function (r, i) {
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + '</td><td>' + r.elo + '</td>' +
+        '<td>' + r.played + '</td><td>' + r.won + '</td><td>' + r.drawn + '</td><td>' + r.lost + '</td>' +
+        '<td>' + r.ipFor + '</td><td>' + r.ipAgainst + '</td><td><strong>' + r.points + '</strong></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  if (appState.updatedAt) {
+    var d = new Date(appState.updatedAt);
+    html += '<p class="updated">Last updated ' +
+      d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + '</p>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+/* ---------- actions ---------- */
+
+function setTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(function (b) {
+    b.classList.toggle('active', b.dataset.tab === name);
+  });
+  ['schedule', 'results', 'scoreboard'].forEach(function (t) {
+    document.getElementById('tab-' + t).hidden = (t !== name);
+  });
+}
+
+function readSelect(card, field) {
+  var sel = card.querySelector('select[data-f="' + field + '"]');
+  return sel ? parseInt(sel.value, 10) : 0;
+}
+
+async function handleAction(action, target) {
+  var turnId = target.dataset.turn;
+  var rowIndex = target.dataset.row ? parseInt(target.dataset.row, 10) : null;
+  var matchId = target.dataset.match;
+  try {
+    if (action === 'save-match') {
+      var card = target.closest('.match');
+      target.disabled = true;
+      await api('recordMatch', {
+        matchId: matchId,
+        whiteIppon: readSelect(card, 'whiteIppon'),
+        redIppon: readSelect(card, 'redIppon'),
+        whiteHansoku: readSelect(card, 'whiteHansoku'),
+        redHansoku: readSelect(card, 'redHansoku')
+      });
+      showStatus('Score saved.');
+    } else if (action === 'save-turn-players') {
+      var ids = [];
+      document.querySelectorAll('input[type="checkbox"][data-turn="' + turnId + '"]:checked')
+        .forEach(function (cb) { ids.push(cb.value); });
+      await api('setTurnPlayers', { turnId: turnId, playerIds: ids });
+      showStatus('Players saved for this turn.');
+    } else if (action === 'generate-round') {
+      var gen = await api('generateRound', { turnId: turnId });
+      showStatus('Round ' + gen.round + ' generated.');
+    } else if (action === 'set-status') {
+      var sel = document.getElementById('status-' + turnId);
+      await api('setTurnStatus', { turnId: turnId, status: sel.value });
+      showStatus('Turn status updated.');
+    } else if (action === 'mark-complete') {
+      await api('setTurnStatus', { turnId: turnId, status: 'Complete' });
+      showStatus('Turn marked complete.');
+    } else if (action === 'edit-schedule') {
+      editingScheduleRow = rowIndex;
+      render();
+      return;
+    } else if (action === 'cancel-schedule') {
+      editingScheduleRow = null;
+      render();
+      return;
+    } else if (action === 'save-schedule') {
+      var date = document.getElementById('se-date-' + rowIndex).value;
+      var label = document.getElementById('se-label-' + rowIndex).value;
+      var status = document.getElementById('se-status-' + rowIndex).value;
+      await api('updateSchedule', { rowIndex: rowIndex, date: date, label: label, status: status });
+      editingScheduleRow = null;
+      showStatus('Schedule updated.');
+    } else {
+      return;
+    }
+    await fetchState();
+  } catch (err) {
+    showStatus(err.message || 'Something went wrong. Please try again.', true);
+    if (target) target.disabled = false;
+  }
+}
+
+document.addEventListener('click', function (e) {
+  var t = e.target.closest('[data-action]');
+  if (!t) return;
+  handleAction(t.dataset.action, t);
+});
+
+document.addEventListener('submit', async function (e) {
+  if (e.target.id === 'createPlayerForm') {
+    e.preventDefault();
+    var name = document.getElementById('npName').value.trim();
+    var club = document.getElementById('npClub').value.trim();
+    if (!name) return;
+    try {
+      await api('createPlayer', { name: name, club: club });
+      showStatus('Player added.');
+      await fetchState();
+    } catch (err) {
+      showStatus(err.message || 'Could not add the player.', true);
+    }
+  } else if (e.target.id === 'createTurnForm') {
+    e.preventDefault();
+    var tname = document.getElementById('ntName').value.trim();
+    var tdate = document.getElementById('ntDate').value;
+    if (!tname || !tdate) return;
+    try {
+      await api('createTurn', { name: tname, date: tdate });
+      showStatus('Turn created.');
+      await fetchState();
+    } catch (err) {
+      showStatus(err.message || 'Could not create the turn.', true);
+    }
+  } else if (e.target.id === 'loginForm') {
+    e.preventDefault();
+    var user = document.getElementById('loginUser').value.trim();
+    var pass = document.getElementById('loginPass').value;
+    var errEl = document.getElementById('loginError');
+    try {
+      var res = await fetch(WEBAPP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'login', username: user, password: pass })
+      });
+      var data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Login failed.');
+      editorCreds = { username: user, password: pass };
+      sessionStorage.setItem('dsl_user', user);
+      sessionStorage.setItem('dsl_pass', pass);
+      document.getElementById('loginModal').hidden = true;
+      errEl.hidden = true;
+      showStatus('Logged in as editor.');
+      await fetchState();
+    } catch (err) {
+      errEl.textContent = err.message || 'Login failed.';
+      errEl.hidden = false;
+    }
+  }
+});
+
+/* ---------- login / logout / tabs ---------- */
+
+document.getElementById('loginBtn').addEventListener('click', function () {
+  document.getElementById('loginModal').hidden = false;
+  document.getElementById('loginUser').focus();
+});
+
+document.getElementById('loginCancel').addEventListener('click', function () {
+  document.getElementById('loginModal').hidden = true;
+  document.getElementById('loginError').hidden = true;
+});
+
+document.getElementById('logoutBtn').addEventListener('click', function () {
+  editorCreds = null;
+  sessionStorage.removeItem('dsl_user');
+  sessionStorage.removeItem('dsl_pass');
+  showStatus('Logged out.');
+  render();
+});
+
+document.querySelectorAll('.tab').forEach(function (b) {
+  b.addEventListener('click', function () { setTab(b.dataset.tab); });
+});
+
+async function restoreSession() {
+  var user = sessionStorage.getItem('dsl_user');
+  var pass = sessionStorage.getItem('dsl_pass');
+  if (!user || !pass || !WEBAPP_URL) return;
+  try {
+    var res = await fetch(WEBAPP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'login', username: user, password: pass })
+    });
+    var data = await res.json();
+    if (data.ok) {
+      editorCreds = { username: user, password: pass };
+    } else {
+      sessionStorage.removeItem('dsl_user');
+      sessionStorage.removeItem('dsl_pass');
+    }
+  } catch (err) {
+    // Stay logged out; the next fetch will show the load error.
+  }
+  updateAuthUI();
+}
+
+/* ---------- polling ---------- */
+
+setInterval(function () {
+  if (document.visibilityState !== 'visible') return;
+  // Do not wipe a form the editor is using.
+  var active = document.activeElement;
+  if (active && (active.tagName === 'SELECT' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+  if (editingScheduleRow !== null) return;
+  if (!document.getElementById('loginModal').hidden) return;
+  fetchState();
+}, 15000);
+
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') fetchState();
+});
+
+/* ---------- start ---------- */
+
+restoreSession().then(fetchState);
+</script>
+</body>
+</html>
