@@ -133,10 +133,6 @@
     padding: 3px 10px;
     white-space: nowrap;
   }
-  .badge.provisional { background: #e3eefb; color: var(--royal); border: 1px solid var(--royal); }
-  .badge.confirmed { background: var(--royal); color: #fff; }
-  .badge.upcoming { background: #e3eefb; color: var(--royal); }
-  .badge.active { background: var(--royal); color: #fff; }
   .badge.complete { background: #e8edf1; color: var(--muted); }
   .sched-edit { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; width: 100%; }
   .sched-edit input, .sched-edit select { padding: 6px 8px; }
@@ -425,6 +421,13 @@ function applySeasonChrome() {
   if (sel) sel.value = String(selectedSeason);
 }
 
+// Alphabetical by display name ("First Last"), case-insensitive.
+function compareName(a, b) {
+  var an = (a && a.name ? a.name : '').toLowerCase();
+  var bn = (b && b.name ? b.name : '').toLowerCase();
+  return an < bn ? -1 : (an > bn ? 1 : 0);
+}
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -656,10 +659,9 @@ function turnPlayersHtml(turnId) {
     .filter(function (tp) { return tp.turnId === turnId; })
     .map(function (tp) { return tp.playerId; });
   if (!ids.length) return '<p class="players-line">No players selected for this turn yet.</p>';
-  var names = ids.map(function (id) {
-    var p = playerById(id);
-    return p ? esc(p.name) : 'Unknown player';
-  });
+  var names = ids.map(function (id) { return playerById(id); })
+    .sort(compareName)
+    .map(function (p) { return p ? esc(p.name) : 'Unknown player'; });
   return '<p class="players-line">Competing: ' + names.join(', ') + '</p>';
 }
 
@@ -669,7 +671,7 @@ function turnAdminHtml(t) {
     if (tp.turnId === t.id) selected[tp.playerId] = true;
   });
   var html = '<div class="turn-admin"><h3>Competing players</h3><div class="plist">';
-  appState.players.forEach(function (p) {
+  appState.players.slice().sort(compareName).forEach(function (p) {
     html += '<label><input type="checkbox" data-turn="' + esc(t.id) + '" value="' + esc(p.id) + '"' +
       (selected[p.id] ? ' checked' : '') + '> ' + esc(p.name) + '</label>';
   });
@@ -678,14 +680,14 @@ function turnAdminHtml(t) {
     '<button class="btn" data-action="save-turn-players" data-turn="' + esc(t.id) + '">Save players</button>' +
     '<button class="btn" data-action="generate-round" data-turn="' + esc(t.id) + '">Generate next round</button>' +
     '<select id="status-' + esc(t.id) + '">' +
-      ['Upcoming', 'Active', 'Complete'].map(function (s) {
-        return '<option value="' + s + '"' + (t.status === s ? ' selected' : '') + '>' + s + '</option>';
+      [['', 'Not complete'], ['Complete', 'Complete']].map(function (opt) {
+        return '<option value="' + opt[0] + '"' + (t.status === opt[0] ? ' selected' : '') + '>' + opt[1] + '</option>';
       }).join('') +
     '</select>' +
     '<button class="btn" data-action="set-status" data-turn="' + esc(t.id) + '">Update status</button>' +
     '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">Mark complete</button>' +
   '</div>';
-  var competing = appState.players.filter(function (p) { return selected[p.id]; });
+  var competing = appState.players.filter(function (p) { return selected[p.id]; }).sort(compareName);
   html += '<h3>Fighting Spirit award</h3><div class="btnrow">';
   if (!competing.length) {
     html += '<span class="empty">Select the competing players above first.</span>';
@@ -705,14 +707,16 @@ function turnAdminHtml(t) {
 var selectedResultsTurnId = null;
 
 function turnPanelHtml(t) {
-  var badge = t.status === 'Active' ? 'active' : (t.status === 'Complete' ? 'complete' : 'upcoming');
+  // The only status is Complete (or empty): show a badge only when the
+  // turn is Complete, and nothing otherwise.
+  var badge = t.status === 'Complete' ? '<span class="badge complete">Complete</span>' : '';
   var meta = [];
   if (t.playerCount > 0) meta.push(t.playerCount + (t.playerCount === 1 ? ' player' : ' players'));
   if (t.fightingSpiritName) meta.push('Fighting Spirit: ' + t.fightingSpiritName);
   var html = '<div class="panel"><div class="turn-head"><div>' +
     '<h2>' + esc(t.name) + '</h2>' +
     (meta.length ? '<div class="turn-date">' + esc(meta.join(' · ')) + '</div>' : '') +
-    '</div><span class="badge ' + badge + '">' + esc(t.status) + '</span></div>';
+    '</div>' + badge + '</div>';
   html += turnPlayersHtml(t.id);
   var ms = appState.matches
     .filter(function (m) { return m.turnId === t.id; })
@@ -755,11 +759,11 @@ function renderResults() {
       '</form></div>' +
     '</div></div>';
   }
-  // One turn at a time, picked from the dropdown. Most recent first;
-  // the Active turn is the default when there is one. Only this
+  // One turn at a time, picked from the dropdown. Chronological,
+  // January first; the most recent turn is the default. Only this
   // season's turns are listed.
   var turns = appState.turns.slice().sort(function (a, b) {
-    return (b.date || '').localeCompare(a.date || '');
+    return (a.date || '').localeCompare(b.date || '');
   }).filter(function (t) { return turnYear(t) === selectedSeason; });
   if (!turns.length) {
     html += '<div class="panel"><p class="empty">No turns yet in ' + selectedSeason + ' - create the first turn to get started.</p></div>';
@@ -767,11 +771,7 @@ function renderResults() {
     return;
   }
   if (!selectedResultsTurnId || !turns.some(function (t) { return t.id === selectedResultsTurnId; })) {
-    var active = null;
-    for (var i = 0; i < turns.length; i++) {
-      if (turns[i].status === 'Active') { active = turns[i]; break; }
-    }
-    selectedResultsTurnId = active ? active.id : turns[0].id;
+    selectedResultsTurnId = turns[turns.length - 1].id;
   }
   var t = null;
   turns.forEach(function (x) { if (x.id === selectedResultsTurnId) t = x; });
@@ -841,13 +841,13 @@ function renderScoreboard() {
     html += '<p class="empty">No players yet - add a player to get started.</p>';
   } else {
     html += '<table class="scoreboard"><thead><tr>' +
-      '<th>Rank</th><th>Name</th><th>Elo</th><th>Played</th><th>Won</th><th>Drawn</th><th>Lost</th>' +
-      '<th>Ippon For</th><th>Ippon Against</th><th>Points</th>' +
+      '<th>Rank</th><th>Name</th><th>Points</th><th>Elo</th><th>Played</th><th>Won</th><th>Drawn</th><th>Lost</th>' +
+      '<th>Ippon For</th><th>Ippon Against</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r, i) {
-      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + '</td><td>' + r.elo + '</td>' +
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + '</td><td><strong>' + r.points + '</strong></td><td>' + r.elo + '</td>' +
         '<td>' + r.played + '</td><td>' + r.won + '</td><td>' + r.drawn + '</td><td>' + r.lost + '</td>' +
-        '<td>' + r.ipFor + '</td><td>' + r.ipAgainst + '</td><td><strong>' + r.points + '</strong></td></tr>';
+        '<td>' + r.ipFor + '</td><td>' + r.ipAgainst + '</td></tr>';
     });
     html += '</tbody></table>';
   }
