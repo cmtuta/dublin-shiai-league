@@ -679,13 +679,7 @@ function turnAdminHtml(t) {
   html += '</div><div class="btnrow">' +
     '<button class="btn" data-action="save-turn-players" data-turn="' + esc(t.id) + '">Save players</button>' +
     '<button class="btn" data-action="generate-round" data-turn="' + esc(t.id) + '">Generate next round</button>' +
-    '<select id="status-' + esc(t.id) + '">' +
-      [['', 'Not complete'], ['Complete', 'Complete']].map(function (opt) {
-        return '<option value="' + opt[0] + '"' + (t.status === opt[0] ? ' selected' : '') + '>' + opt[1] + '</option>';
-      }).join('') +
-    '</select>' +
-    '<button class="btn" data-action="set-status" data-turn="' + esc(t.id) + '">Update status</button>' +
-    '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">Mark complete</button>' +
+    '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">' + (t.status === 'Complete' ? 'Unmark complete' : 'Mark complete') + '</button>' +
   '</div>';
   var competing = appState.players.filter(function (p) { return selected[p.id]; }).sort(compareName);
   html += '<h3>Fighting Spirit award</h3><div class="btnrow">';
@@ -1048,13 +1042,13 @@ async function handleAction(action, target) {
     } else if (action === 'generate-round') {
       var gen = await api('generateRound', { turnId: turnId });
       showStatus('Round ' + gen.round + ' generated.');
-    } else if (action === 'set-status') {
-      var sel = document.getElementById('status-' + turnId);
-      await api('setTurnStatus', { turnId: turnId, status: sel.value });
-      showStatus('Turn status updated.');
     } else if (action === 'mark-complete') {
-      await api('setTurnStatus', { turnId: turnId, status: 'Complete' });
-      showStatus('Turn marked complete.');
+      // Toggle: a Complete turn goes back to empty, otherwise it is marked Complete.
+      var turn = null;
+      appState.turns.forEach(function (x) { if (x.id === turnId) turn = x; });
+      var toComplete = !turn || turn.status !== 'Complete';
+      await api('setTurnStatus', { turnId: turnId, status: toComplete ? 'Complete' : '' });
+      showStatus(toComplete ? 'Turn marked complete.' : 'Turn unmarked (no longer complete).');
     } else if (action === 'save-fighting-spirit') {
       var fsSel = document.getElementById('fs-' + turnId);
       await api('setFightingSpirit', { turnId: turnId, playerId: fsSel ? fsSel.value : '' });
