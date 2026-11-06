@@ -38,6 +38,14 @@
   }
   header h1 { margin: 0; font-size: 28px; line-height: 1.2; }
   header .season { margin: 2px 0 0; font-size: 16px; color: #bcd3e8; }
+  #seasonSelect {
+    background: var(--navy);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    border-radius: 4px;
+    font-size: 15px;
+    padding: 4px 8px;
+  }
   .head-right { text-align: right; flex-shrink: 0; }
   #loginState { display: block; font-size: 13px; color: #bcd3e8; margin-bottom: 6px; }
   nav.tabs {
@@ -113,6 +121,7 @@
     flex-wrap: wrap;
   }
   .sched-row:last-child { border-bottom: none; }
+  .sched-num { color: var(--muted); font-size: 14px; min-width: 58px; }
   .sched-date { font-weight: 700; min-width: 150px; color: var(--navy); }
   .sched-label { flex: 1; min-width: 120px; }
   .sched-notes { color: var(--muted); font-size: 13px; width: 100%; }
@@ -328,7 +337,17 @@
   <div class="head-inner">
     <div>
       <h1>Dublin Shiai League</h1>
-      <p class="season">2027 season</p>
+      <p class="season"><select id="seasonSelect" aria-label="Season">
+        <option value="2027">2027 season</option>
+        <option value="2028">2028 season</option>
+        <option value="2029">2029 season</option>
+        <option value="2030">2030 season</option>
+        <option value="2031">2031 season</option>
+        <option value="2032">2032 season</option>
+        <option value="2033">2033 season</option>
+        <option value="2034">2034 season</option>
+        <option value="2035">2035 season</option>
+      </select></p>
     </div>
     <div class="head-right">
       <span id="loginState"></span>
@@ -352,7 +371,7 @@
   <section id="tab-fighters" class="tabpage" hidden></section>
 </main>
 
-<footer>Dublin Kendo Kobukai · Dublin Shiai League 2027</footer>
+<footer id="pageFooter">Dublin Kendo Kobukai · Dublin Shiai League 2027</footer>
 
 <button id="toTopBtn" class="to-top" hidden>↑ Top</button>
 
@@ -383,6 +402,28 @@ var editorCreds = null;
 var currentTab = 'schedule';
 var editingTurnDate = null;
 var statusTimer = null;
+
+// Seasons: the player list and Elo carry over year to year, but the
+// schedule, results, scoreboard and fighter stats are all for the
+// selected season only. A turn belongs to the year of its date.
+var SEASONS = [2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
+var selectedSeason = 2027;
+try {
+  var savedSeason = parseInt(localStorage.getItem('dsl_season') || '', 10);
+  if (SEASONS.indexOf(savedSeason) >= 0) selectedSeason = savedSeason;
+} catch (err) { /* private mode: stay on 2027 */ }
+
+function turnYear(t) {
+  return t && t.date ? parseInt(String(t.date).substring(0, 4), 10) : null;
+}
+
+function applySeasonChrome() {
+  document.title = 'Dublin Shiai League ' + selectedSeason;
+  var footer = document.getElementById('pageFooter');
+  if (footer) footer.textContent = 'Dublin Kendo Kobukai · Dublin Shiai League ' + selectedSeason;
+  var sel = document.getElementById('seasonSelect');
+  if (sel) sel.value = String(selectedSeason);
+}
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -472,6 +513,7 @@ async function api(action, payload) {
 
 function render() {
   var y = window.scrollY;
+  applySeasonChrome();
   renderSchedule();
   renderResults();
   renderScoreboard();
@@ -490,17 +532,20 @@ function updateAuthUI() {
 function renderSchedule() {
   var el = document.getElementById('tab-schedule');
   if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
-  // The schedule IS the turns: each turn takes its name from its date.
+  // The schedule IS the turns, for the selected season only, in date
+  // order. The turn number is the position in that order (Turn 1 is
+  // the season's first turn).
   var turns = appState.turns.slice().sort(function (a, b) {
     return (a.date || '').localeCompare(b.date || '');
-  });
+  }).filter(function (t) { return turnYear(t) === selectedSeason; });
   if (!turns.length) {
-    el.innerHTML = '<div class="panel"><p class="empty">No league dates yet.</p></div>';
+    el.innerHTML = '<div class="panel"><p class="empty">No league dates yet in ' + selectedSeason + '.</p></div>';
     return;
   }
   var html = '<div class="panel"><h2>League dates</h2>';
-  turns.forEach(function (t) {
+  turns.forEach(function (t, i) {
     html += '<div class="sched-row">' +
+      '<span class="sched-num">Turn ' + (i + 1) + '</span>' +
       '<span class="sched-date">' + esc(t.name) + '</span>';
     if (t.playerCount > 0) {
       html += '<span class="sched-label">' + t.playerCount + (t.playerCount === 1 ? ' player' : ' players') + '</span>';
@@ -711,12 +756,13 @@ function renderResults() {
     '</div></div>';
   }
   // One turn at a time, picked from the dropdown. Most recent first;
-  // the Active turn is the default when there is one.
+  // the Active turn is the default when there is one. Only this
+  // season's turns are listed.
   var turns = appState.turns.slice().sort(function (a, b) {
     return (b.date || '').localeCompare(a.date || '');
-  });
+  }).filter(function (t) { return turnYear(t) === selectedSeason; });
   if (!turns.length) {
-    html += '<div class="panel"><p class="empty">No turns yet - create the first turn to get started.</p></div>';
+    html += '<div class="panel"><p class="empty">No turns yet in ' + selectedSeason + ' - create the first turn to get started.</p></div>';
     el.innerHTML = html;
     return;
   }
@@ -749,8 +795,14 @@ function scoreboardRows() {
   });
   var byId = {};
   rows.forEach(function (r) { byId[r.id] = r; });
+  // The scoreboard is specific to the selected season: only matches
+  // in turns of that year count. Elo is the player's current (global)
+  // rating, which carries over year to year.
+  var turnYearById = {};
+  appState.turns.forEach(function (t) { turnYearById[t.id] = turnYear(t); });
   appState.matches.forEach(function (m) {
     if (!m.completed) return;
+    if (turnYearById[m.turnId] !== selectedSeason) return;
     var w = byId[m.whiteId];
     var r = byId[m.redId];
     if (!w || !r) return;
@@ -817,6 +869,8 @@ function statHtml(num, label) {
 }
 
 // Season stats for one fighter, computed from the state the page already has.
+// Like the scoreboard, this is for the selected season only: turns
+// attended, matches, ippons and awards all come from that year's turns.
 function fighterStats(pid) {
   var s = appState.settings;
   var st = {
@@ -827,12 +881,20 @@ function fighterStats(pid) {
   };
   var p = playerById(pid);
   if (p) st.elo = p.elo;
-  appState.turnPlayers.forEach(function (tp) { if (tp.playerId === pid) st.turns++; });
+  var turnById = {};
+  appState.turns.forEach(function (t) { turnById[t.id] = t; });
+  appState.turnPlayers.forEach(function (tp) {
+    if (tp.playerId !== pid) return;
+    var t = turnById[tp.turnId];
+    if (t && turnYear(t) === selectedSeason) st.turns++;
+  });
   appState.turns.forEach(function (t) {
-    if (t.fightingSpirit === pid) st.awards.push(t);
+    if (t.fightingSpirit === pid && turnYear(t) === selectedSeason) st.awards.push(t);
   });
   appState.matches.forEach(function (m) {
     if (!m.completed) return;
+    var mt = turnById[m.turnId];
+    if (!mt || turnYear(mt) !== selectedSeason) return;
     var isWhite = m.whiteId === pid;
     var isRed = m.redId === pid;
     if (!isWhite && !isRed) return;
@@ -901,7 +963,11 @@ function renderFighters() {
   var turnById = {};
   appState.turns.forEach(function (t) { turnById[t.id] = t; });
   var ms = appState.matches
-    .filter(function (m) { return m.whiteId === p.id || m.redId === p.id; })
+    .filter(function (m) {
+      if (m.whiteId !== p.id && m.redId !== p.id) return false;
+      var mt = turnById[m.turnId];
+      return mt && turnYear(mt) === selectedSeason;
+    })
     .sort(function (a, b) {
       var da = (turnById[a.turnId] && turnById[a.turnId].date) || '';
       var db = (turnById[b.turnId] && turnById[b.turnId].date) || '';
@@ -1027,6 +1093,13 @@ document.addEventListener('click', function (e) {
 document.addEventListener('change', function (e) {
   var sel = e.target;
   if (!sel || sel.tagName !== 'SELECT') return;
+  if (sel.id === 'seasonSelect') {
+    selectedSeason = parseInt(sel.value, 10) || 2027;
+    try { localStorage.setItem('dsl_season', String(selectedSeason)); } catch (err) {}
+    selectedResultsTurnId = null;
+    render();
+    return;
+  }
   if (sel.id === 'fighterSelect') {
     selectedFighterId = sel.value;
     renderFighters();
@@ -1073,6 +1146,14 @@ document.addEventListener('submit', async function (e) {
     if (!tdate) return;
     try {
       await api('createTurn', { date: tdate });
+      // A turn belongs to the year of its date: switch the view to
+      // that season so the turn just created is visible.
+      var y = parseInt(String(tdate).substring(0, 4), 10);
+      if (y && SEASONS.indexOf(y) >= 0 && y !== selectedSeason) {
+        selectedSeason = y;
+        try { localStorage.setItem('dsl_season', String(y)); } catch (err) {}
+        selectedResultsTurnId = null;
+      }
       showStatus('Turn created.');
       await fetchState();
     } catch (err) {
