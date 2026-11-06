@@ -217,12 +217,7 @@
     align-items: center;
     gap: 5px;
   }
-  .centre-types {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-  }
-  .centre-types select { font-size: 13px; padding: 4px 6px; }
+  .hansoku-select { color: var(--hansoku); }
   .score { font-size: 21px; font-weight: 700; min-width: 62px; text-align: center; }
   .slot {
     width: 18px;
@@ -261,6 +256,9 @@
   .plist label { font-size: 14px; }
   .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .btnrow select { padding: 6px 8px; }
+  .section-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .section-head h3 { margin: 0; }
+  .section-actions { display: flex; gap: 8px; }
   /* Scoreboard */
   table.scoreboard { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.scoreboard th {
@@ -585,6 +583,7 @@ function renderSchedule() {
         html += '<div class="sched-edit">' +
           '<input type="date" id="te-date-' + esc(t.id) + '" value="' + esc(t.date) + '">' +
           '<button class="btn small" data-action="save-turn-date" data-turn="' + esc(t.id) + '">Save</button>' +
+          '<button class="btn small danger" data-action="delete-turn" data-turn="' + esc(t.id) + '">Delete turn</button>' +
           '<button class="btn small ghost" data-action="cancel-turn-date">Cancel</button>' +
         '</div>';
       } else {
@@ -615,33 +614,44 @@ function centreHtml(m) {
     hansokuSlot(m.redHansoku);
 }
 
-function ipponOptions(v) {
-  var html = '';
-  [0, 1, 2].forEach(function (n) {
-    html += '<option value="' + n + '"' + (v === n ? ' selected' : '') + '>' + n + '</option>';
-  });
-  return html;
-}
+var IPPON_TYPES = ['Men', 'Kote', 'Do', 'Tsuki', 'Hansoku', 'Ippon'];
+var IPPON_INITIALS = { Men: 'M', Kote: 'K', Do: 'D', Tsuki: 'T', Hansoku: 'H', Ippon: 'I' };
 
-var IPPON_TYPES = ['Men', 'Kote', 'Do', 'Tsuki', 'Hansoku'];
-
+// The type dropdowns show only the initial (M, K, D, T, H, I). A blank
+// dropdown is no ippon in that slot.
 function ipponTypeOptions(v) {
-  var html = '<option value="">Type</option>';
+  var html = '<option value=""></option>';
   IPPON_TYPES.forEach(function (t) {
-    html += '<option value="' + t + '"' + (v === t ? ' selected' : '') + '>' + t + '</option>';
+    html += '<option value="' + t + '"' + (v === t ? ' selected' : '') + '>' + IPPON_INITIALS[t] + '</option>';
   });
   return html;
 }
 
-// One type dropdown per ippon scored by this side (none when the count is 0).
-function typeSelectsHtml(m, side) {
+// One hansoku dropdown per side: blank for none, a single red triangle
+// for one hansoku. A player never holds two at once: a second hansoku
+// is an ippon for the opponent (recorded as H) and the counter resets.
+function hansokuOptions(v) {
+  return '<option value="0"' + (v === 0 ? ' selected' : '') + '></option>' +
+    '<option value="1"' + (v === 1 ? ' selected' : '') + '>▲</option>';
+}
+
+// A single ippon-type dropdown for one ippon slot of a side.
+function ipponTypeSelectHtml(side, i, value) {
+  var label = (side === 'white' ? 'White' : 'Red') + ' ippon ' + (i + 1);
+  return '<select data-f="' + side + 'IpponType' + i + '" title="' + label + '" aria-label="' + label + '">' +
+    ipponTypeOptions(value || '') + '</select>';
+}
+
+// The two type dropdowns for a side, with any ippon recorded without a
+// type shown as a generic Ippon (I) so the count and the dropdowns agree.
+function effectiveTypes(m, side) {
   var count = side === 'white' ? m.whiteIppon : m.redIppon;
   var types = side === 'white' ? (m.whiteIpponTypes || []) : (m.redIpponTypes || []);
-  var html = '';
-  for (var i = 0; i < count; i++) {
-    html += '<select data-f="' + side + 'IpponType' + i + '">' + ipponTypeOptions(types[i] || '') + '</select>';
+  var out = [];
+  for (var i = 0; i < 2; i++) {
+    out.push(types[i] || (i < count ? 'Ippon' : ''));
   }
-  return html;
+  return out;
 }
 
 // Options for the fighter selects in a match card: the turn's competing
@@ -671,22 +681,24 @@ function matchCardHtml(m, turn) {
   var redSide = isEditor()
     ? '<select data-f="redPlayer" title="Red fighter" aria-label="Red fighter">' + matchPlayerOptionsHtml(turn, m.redId) + '</select>'
     : '<span>' + esc(playerName(m.redId)) + '</span>';
-  // Nationals-style centre: the ippon dropdowns sit next to the score and
-  // the hansoku dropdowns sit beside them (hansoku outermost). The centre
-  // is light grey so it reads apart from the white fighter's side. There
-  // is no Save button: changing any dropdown saves the match automatically.
+  // Nationals-style centre: one type dropdown per ippon slot (two per
+  // fighter), showing only the initial, next to the score; the hansoku
+  // dropdown sits beside them (hansoku outermost) and shows a single red
+  // triangle. The score is the count of filled type dropdowns per side.
+  // There is no ippon-count dropdown and no Save button: changing any
+  // dropdown saves the match automatically.
   var centreInner;
   if (isEditor()) {
+    var wTypes = effectiveTypes(m, 'white');
+    var rTypes = effectiveTypes(m, 'red');
     centreInner = '<div class="centre-row">' +
-      '<select data-f="whiteHansoku" title="White hansoku" aria-label="White hansoku">' + ipponOptions(m.whiteHansoku) + '</select>' +
-      '<select data-f="whiteIppon" title="White ippon" aria-label="White ippon">' + ipponOptions(m.whiteIppon) + '</select>' +
+      '<select data-f="whiteHansoku" class="hansoku-select" title="White hansoku" aria-label="White hansoku">' + hansokuOptions(m.whiteHansoku) + '</select>' +
+      ipponTypeSelectHtml('white', 0, wTypes[0]) +
+      ipponTypeSelectHtml('white', 1, wTypes[1]) +
       '<span class="score">' + m.whiteIppon + ' - ' + m.redIppon + '</span>' +
-      '<select data-f="redIppon" title="Red ippon" aria-label="Red ippon">' + ipponOptions(m.redIppon) + '</select>' +
-      '<select data-f="redHansoku" title="Red hansoku" aria-label="Red hansoku">' + ipponOptions(m.redHansoku) + '</select>' +
-    '</div>' +
-    '<div class="centre-types">' +
-      '<span data-types="white">' + typeSelectsHtml(m, 'white') + '</span>' +
-      '<span data-types="red">' + typeSelectsHtml(m, 'red') + '</span>' +
+      ipponTypeSelectHtml('red', 1, rTypes[1]) +
+      ipponTypeSelectHtml('red', 0, rTypes[0]) +
+      '<select data-f="redHansoku" class="hansoku-select" title="Red hansoku" aria-label="Red hansoku">' + hansokuOptions(m.redHansoku) + '</select>' +
     '</div>';
   } else {
     centreInner = '<div class="centre-row">' + centreHtml(m) + '</div>';
@@ -726,7 +738,10 @@ function turnAdminHtml(t) {
   appState.turnPlayers.forEach(function (tp) {
     if (tp.turnId === t.id) selected[tp.playerId] = true;
   });
-  var html = '<div class="turn-admin"><h3>Competing players</h3><div class="plist">';
+  var html = '<div class="turn-admin"><div class="section-head"><h3>Competing players</h3><span class="section-actions">' +
+    '<button class="btn small ghost" data-action="select-all-players" data-turn="' + esc(t.id) + '">Select all</button>' +
+    '<button class="btn small ghost" data-action="unselect-all-players" data-turn="' + esc(t.id) + '">Unselect all</button>' +
+  '</span></div><div class="plist">';
   appState.players.slice().sort(compareName).forEach(function (p) {
     html += '<label><input type="checkbox" data-turn="' + esc(t.id) + '" value="' + esc(p.id) + '"' +
       (selected[p.id] ? ' checked' : '') + '> ' + esc(p.name) + '</label>';
@@ -947,7 +962,7 @@ function fighterStats(pid) {
   var st = {
     elo: 0, points: 0, turns: 0, played: 0, won: 0, drawn: 0, lost: 0,
     ipFor: 0, ipAgainst: 0, hansoku: 0,
-    types: { Men: 0, Kote: 0, Do: 0, Tsuki: 0, Hansoku: 0 },
+    types: { Men: 0, Kote: 0, Do: 0, Tsuki: 0, Hansoku: 0, Ippon: 0 },
     awards: []
   };
   var p = playerById(pid);
@@ -1023,7 +1038,7 @@ function renderFighters() {
     statHtml(st.ipFor, 'Ippon for') + statHtml(st.ipAgainst, 'Ippon against') + statHtml(st.hansoku, 'Hansoku') +
     '</div>';
   html += '<p><strong>Ippons scored by type:</strong> ' +
-    esc(['Men', 'Kote', 'Do', 'Tsuki', 'Hansoku'].map(function (t) { return t + ': ' + st.types[t]; }).join(' · ')) + '</p>';
+    esc(IPPON_TYPES.map(function (t) { return t + ': ' + st.types[t]; }).join(' · ')) + '</p>';
   if (st.awards.length) {
     html += '<p><strong>Fighting Spirit awards:</strong> ' +
       esc(st.awards.map(function (t) { return t.name; }).join(', ')) + '</p>';
@@ -1118,6 +1133,13 @@ async function handleAction(action, target) {
         .forEach(function (cb) { ids.push(cb.value); });
       await api('setTurnPlayers', { turnId: turnId, playerIds: ids });
       showStatus('Players saved for this turn.');
+    } else if (action === 'select-all-players' || action === 'unselect-all-players') {
+      // Local only: check or uncheck every competing-player checkbox on
+      // this turn. Save players still commits the choice.
+      var on = action === 'select-all-players';
+      document.querySelectorAll('input[type="checkbox"][data-turn="' + turnId + '"]')
+        .forEach(function (cb) { cb.checked = on; });
+      return;
     } else if (action === 'generate-round') {
       var gen = await api('generateRound', { turnId: turnId });
       showStatus('Round ' + gen.round + ' generated.');
@@ -1145,6 +1167,11 @@ async function handleAction(action, target) {
       await api('updateTurnDate', { turnId: turnId, date: newDate });
       editingTurnDate = null;
       showStatus('Turn date updated.');
+    } else if (action === 'delete-turn') {
+      if (!window.confirm('Delete this turn, with all its matches and player selections? This cannot be undone.')) return;
+      await api('deleteTurn', { turnId: turnId });
+      editingTurnDate = null;
+      showStatus('Turn deleted.');
     } else {
       return;
     }
@@ -1166,21 +1193,25 @@ function readPlayerSelect(card, field) {
   return sel ? sel.value : '';
 }
 
-// Save the match on this card (ippons, hansoku, types). The result counts
-// toward the scoreboard and Elo as soon as the recorder sets it. No full
-// refresh here: the score is already updated in place, and the 15-second
-// poll picks up the new state without wiping the form the recorder is using.
+// Save the match on this card. The ippon count per side is the number
+// of filled type dropdowns, and the types are the filled values. The
+// result counts toward the scoreboard and Elo as soon as the recorder
+// sets it. No full refresh here: the score is already updated in place,
+// and the 15-second poll picks up the new state without wiping the form
+// the recorder is using.
 async function saveMatchCard(card) {
   var matchId = card.dataset.match;
+  var wTypes = readTypeSelects(card, 'white').filter(function (t) { return t; });
+  var rTypes = readTypeSelects(card, 'red').filter(function (t) { return t; });
   try {
     await api('recordMatch', {
       matchId: matchId,
-      whiteIppon: readSelect(card, 'whiteIppon'),
-      redIppon: readSelect(card, 'redIppon'),
+      whiteIppon: wTypes.length,
+      redIppon: rTypes.length,
       whiteHansoku: readSelect(card, 'whiteHansoku'),
       redHansoku: readSelect(card, 'redHansoku'),
-      whiteIpponTypes: readTypeSelects(card, 'white'),
-      redIpponTypes: readTypeSelects(card, 'red')
+      whiteIpponTypes: wTypes,
+      redIpponTypes: rTypes
     });
     showStatus('Score saved.');
   } catch (err) {
@@ -1242,28 +1273,20 @@ document.addEventListener('change', function (e) {
   var f = sel.getAttribute('data-f');
   var card = sel.closest('.match');
   if (!card) return;
-  // Ippon count changed: rebuild the type dropdowns and keep the centre
-  // score in step with the dropdowns, then save.
-  if (f === 'whiteIppon' || f === 'redIppon') {
-    var side = f === 'whiteIppon' ? 'white' : 'red';
-    var count = parseInt(sel.value, 10) || 0;
-    var holder = card.querySelector('[data-types="' + side + '"]');
-    if (holder) {
-      var kept = [];
-      holder.querySelectorAll('select').forEach(function (s) { kept.push(s.value); });
-      var html = '';
-      for (var i = 0; i < count; i++) {
-        html += '<select data-f="' + side + 'IpponType' + i + '">' + ipponTypeOptions(kept[i] || '') + '</select>';
-      }
-      holder.innerHTML = html;
-    }
+  // An ippon type changed: the score is the count of filled type
+  // dropdowns per side, so update it in place, then save.
+  if (f.indexOf('IpponType') !== -1) {
     var score = card.querySelector('.score');
-    if (score) score.textContent = readSelect(card, 'whiteIppon') + ' - ' + readSelect(card, 'redIppon');
+    if (score) {
+      var w = readTypeSelects(card, 'white').filter(function (t) { return t; }).length;
+      var r = readTypeSelects(card, 'red').filter(function (t) { return t; }).length;
+      score.textContent = w + ' - ' + r;
+    }
     scheduleSave(card, 'result');
     return;
   }
-  // Hansoku or an ippon type changed: save the match as-is.
-  if (f === 'whiteHansoku' || f === 'redHansoku' || f.indexOf('IpponType') !== -1) {
+  // Hansoku changed: save the match as-is.
+  if (f === 'whiteHansoku' || f === 'redHansoku') {
     scheduleSave(card, 'result');
     return;
   }
