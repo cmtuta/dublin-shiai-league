@@ -429,12 +429,28 @@ var saveTimers = {}; // matchId -> pending auto-save timer
 // Seasons: the player list and Elo carry over year to year, but the
 // schedule, results, scoreboard and fighter stats are all for the
 // selected season only. A turn belongs to the year of its date.
+// "All time" (selectedSeason === 'all') lifts the season filter and
+// shows everything consolidated across all seasons.
 var SEASONS = [2027];
 var selectedSeason = 2027;
 try {
-  var savedSeason = parseInt(localStorage.getItem('dsl_season') || '', 10);
-  if (SEASONS.indexOf(savedSeason) >= 0) selectedSeason = savedSeason;
+  var savedSeason = localStorage.getItem('dsl_season') || '';
+  if (savedSeason === 'all') selectedSeason = 'all';
+  else {
+    var savedYear = parseInt(savedSeason, 10);
+    if (SEASONS.indexOf(savedYear) >= 0) selectedSeason = savedYear;
+  }
 } catch (err) { /* private mode: stay on 2027 */ }
+
+function isAllTime() {
+  return selectedSeason === 'all';
+}
+
+// Whether a turn's year belongs to the current view: every year when
+// "All time" is selected, otherwise only the selected season.
+function seasonIncludes(year) {
+  return isAllTime() || year === selectedSeason;
+}
 
 function turnYear(t) {
   return t && t.date ? parseInt(String(t.date).substring(0, 4), 10) : null;
@@ -449,15 +465,17 @@ function availableSeasons() {
 }
 
 function applySeasonChrome() {
-  document.title = 'Dublin Shiai League ' + selectedSeason;
+  var label = isAllTime() ? 'All time' : selectedSeason;
+  document.title = 'Dublin Shiai League ' + label;
   var footer = document.getElementById('pageFooter');
-  if (footer) footer.textContent = 'Dublin Kendo Kobukai · Dublin Shiai League ' + selectedSeason;
+  if (footer) footer.textContent = 'Dublin Kendo Kobukai · Dublin Shiai League ' + label;
   var sel = document.getElementById('seasonSelect');
   if (sel) {
     var list = availableSeasons();
-    sel.innerHTML = list.map(function (y) {
-      return '<option value="' + y + '"' + (y === selectedSeason ? ' selected' : '') + '>' + y + ' season</option>';
-    }).join('');
+    sel.innerHTML = '<option value="all"' + (isAllTime() ? ' selected' : '') + '>All time</option>' +
+      list.map(function (y) {
+        return '<option value="' + y + '"' + (y === selectedSeason ? ' selected' : '') + '>' + y + ' season</option>';
+      }).join('');
     sel.value = String(selectedSeason);
   }
 }
@@ -590,12 +608,12 @@ function renderSchedule() {
   if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
   // The schedule IS the turns, for the selected season only, in date
   // order. The turn number is the position in that order (Turn 1 is
-  // the season's first turn).
+  // the season's first turn). "All time" lists every turn, in date order.
   var turns = appState.turns.slice().sort(function (a, b) {
     return (a.date || '').localeCompare(b.date || '');
-  }).filter(function (t) { return turnYear(t) === selectedSeason; });
+  }).filter(function (t) { return seasonIncludes(turnYear(t)); });
   if (!turns.length) {
-    el.innerHTML = '<div class="panel"><p class="empty">No league dates yet in ' + selectedSeason + '.</p></div>';
+    el.innerHTML = '<div class="panel"><p class="empty">No league dates yet' + (isAllTime() ? '.' : ' in ' + selectedSeason + '.') + '</p></div>';
     return;
   }
   var html = '<div class="panel"><h2>League dates</h2>';
@@ -919,12 +937,12 @@ function renderResults() {
   }
   // One turn at a time, picked from the dropdown. Chronological,
   // January first; the most recent turn is the default. Only this
-  // season's turns are listed.
+  // season's turns are listed ("All time" lists every turn).
   var turns = appState.turns.slice().sort(function (a, b) {
     return (a.date || '').localeCompare(b.date || '');
-  }).filter(function (t) { return turnYear(t) === selectedSeason; });
+  }).filter(function (t) { return seasonIncludes(turnYear(t)); });
   if (!turns.length) {
-    html += '<div class="panel"><p class="empty">No turns yet in ' + selectedSeason + ' - create the first turn to get started.</p></div>';
+    html += '<div class="panel"><p class="empty">No turns yet' + (isAllTime() ? ' - create the first turn to get started.' : ' in ' + selectedSeason + ' - create the first turn to get started.') + '</p></div>';
     el.innerHTML = html;
     return;
   }
@@ -946,12 +964,13 @@ function renderResults() {
 function scoreboardRows() {
   var s = appState.settings;
   // The scoreboard is specific to the selected season, and only shows
-  // players who attended at least one turn in that season.
+  // players who attended at least one turn in that season. "All time"
+  // consolidates every season: attendance and matches across all years.
   var turnYearById = {};
   appState.turns.forEach(function (t) { turnYearById[t.id] = turnYear(t); });
   var attended = {};
   appState.turnPlayers.forEach(function (tp) {
-    if (turnYearById[tp.turnId] === selectedSeason) attended[tp.playerId] = true;
+    if (seasonIncludes(turnYearById[tp.turnId])) attended[tp.playerId] = true;
   });
   var rows = appState.players.filter(function (p) { return attended[p.id]; }).map(function (p) {
     return {
@@ -965,7 +984,7 @@ function scoreboardRows() {
   // player's current (global) rating, which carries over year to year.
   appState.matches.forEach(function (m) {
     if (!m.completed) return;
-    if (turnYearById[m.turnId] !== selectedSeason) return;
+    if (!seasonIncludes(turnYearById[m.turnId])) return;
     var w = byId[m.whiteId];
     var r = byId[m.redId];
     if (!w || !r) return;
@@ -1002,7 +1021,7 @@ function renderScoreboard() {
   var html = '<div class="panel"><h2>Scoreboard</h2>';
   if (!rows.length) {
     html += '<p class="empty">' + (appState.players.length
-      ? 'No players have attended a turn in ' + selectedSeason + ' yet.'
+      ? (isAllTime() ? 'No players have attended a turn yet.' : 'No players have attended a turn in ' + selectedSeason + ' yet.')
       : 'No players yet - add a player to get started.') + '</p>';
   } else {
     html += '<table class="scoreboard"><thead><tr>' +
@@ -1053,15 +1072,15 @@ function fighterStats(pid) {
   appState.turnPlayers.forEach(function (tp) {
     if (tp.playerId !== pid) return;
     var t = turnById[tp.turnId];
-    if (t && turnYear(t) === selectedSeason) st.turns++;
+    if (t && seasonIncludes(turnYear(t))) st.turns++;
   });
   appState.turns.forEach(function (t) {
-    if ((t.fightingSpirit || []).indexOf(pid) !== -1 && turnYear(t) === selectedSeason) st.awards.push(t);
+    if ((t.fightingSpirit || []).indexOf(pid) !== -1 && seasonIncludes(turnYear(t))) st.awards.push(t);
   });
   appState.matches.forEach(function (m) {
     if (!m.completed) return;
     var mt = turnById[m.turnId];
-    if (!mt || turnYear(mt) !== selectedSeason) return;
+    if (!mt || !seasonIncludes(turnYear(mt))) return;
     var isWhite = m.whiteId === pid;
     var isRed = m.redId === pid;
     if (!isWhite && !isRed) return;
@@ -1133,7 +1152,7 @@ function renderFighters() {
     .filter(function (m) {
       if (m.whiteId !== p.id && m.redId !== p.id) return false;
       var mt = turnById[m.turnId];
-      return mt && turnYear(mt) === selectedSeason;
+      return mt && seasonIncludes(turnYear(mt));
     })
     .sort(function (a, b) {
       var da = (turnById[a.turnId] && turnById[a.turnId].date) || '';
@@ -1157,8 +1176,10 @@ function renderFighters() {
 /* ---------- Hall of Fame ---------- */
 
 // The Hall of Fame for the selected season, or null if the backend did
-// not return one (older deployments).
+// not return one (older deployments) or when "All time" is selected
+// (awards are annual, per season).
 function hallOfFame() {
+  if (isAllTime()) return null;
   if (!appState || !appState.hallOfFame) return null;
   return appState.hallOfFame[String(selectedSeason)] || null;
 }
@@ -1169,8 +1190,10 @@ function hofVisibleToViewers() {
 }
 
 // The tab is shown to editors always, and to viewers only once an
-// editor has published that season's Hall of Fame.
+// editor has published that season's Hall of Fame. It is hidden for
+// "All time" (awards are annual, per season).
 function hofTabVisible() {
+  if (isAllTime()) return false;
   return isEditor() || hofVisibleToViewers();
 }
 
@@ -1181,7 +1204,7 @@ function hofTabVisible() {
 function isPlayerActive(pid) {
   var hof = hallOfFame();
   if (hof && hof.activePlayerIds) return hof.activePlayerIds.indexOf(pid) !== -1;
-  var seasonTurns = (appState.turns || []).filter(function (t) { return turnYear(t) === selectedSeason; });
+  var seasonTurns = (appState.turns || []).filter(function (t) { return seasonIncludes(turnYear(t)); });
   var latestComplete = null;
   seasonTurns.forEach(function (t) {
     if (t.status === 'Complete' && (!latestComplete || (t.date || '') > (latestComplete.date || ''))) latestComplete = t;
@@ -1545,7 +1568,7 @@ document.addEventListener('change', function (e) {
   var sel = e.target;
   if (!sel || sel.tagName !== 'SELECT') return;
   if (sel.id === 'seasonSelect') {
-    selectedSeason = parseInt(sel.value, 10) || 2027;
+    selectedSeason = sel.value === 'all' ? 'all' : (parseInt(sel.value, 10) || 2027);
     try { localStorage.setItem('dsl_season', String(selectedSeason)); } catch (err) {}
     selectedResultsTurnId = null;
     render();
