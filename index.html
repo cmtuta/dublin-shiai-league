@@ -25,6 +25,11 @@
     background: var(--bg);
     color: var(--ink);
     line-height: 1.45;
+    /* Safety net: no page-level horizontal scroll on narrow screens, so the
+       header background always covers the full width of the content. The
+       real fixes are the wrapping nav and the scrollable table wrappers
+       below; this only catches anything those miss. */
+    overflow-x: hidden;
   }
   header { background: var(--navy); color: #fff; }
   .head-inner {
@@ -54,6 +59,9 @@
     padding: 0 16px;
     display: flex;
     gap: 4px;
+    /* Wrap on narrow screens so all six tabs stay inside the navy header
+       instead of overflowing onto the page background. */
+    flex-wrap: wrap;
   }
   .tab {
     background: none;
@@ -334,6 +342,23 @@
     box-shadow: 0 2px 8px rgba(22, 54, 92, 0.35);
   }
   .to-top[hidden] { display: none; }
+  /* Wide tables (scoreboard, Hall of Fame, Admin logins) scroll inside their
+     own container on narrow screens instead of forcing the whole page wider
+     than the viewport, which is what left the header background short. */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { min-width: 560px; }
+  /* Mobile */
+  @media (max-width: 640px) {
+    .head-inner { flex-wrap: wrap; padding: 14px 16px 10px; }
+    header h1 { font-size: 22px; }
+    .head-right { text-align: left; }
+    .tab { padding: 10px 12px; font-size: 15px; }
+    main { padding: 12px; }
+    .panel { padding: 12px; }
+    .side { font-size: 16px; padding: 10px 8px; }
+    .score { font-size: 18px; min-width: 48px; }
+    .centre { padding: 8px 6px; }
+  }
   /* Login modal */
   .modal[hidden] { display: none; }
   .modal {
@@ -1115,7 +1140,7 @@ function renderScoreboard() {
       ? (isAllTime() ? 'No players have attended a turn yet.' : 'No players have attended a turn in ' + selectedSeason + ' yet.')
       : 'No players yet - add a player to get started.') + '</p>';
   } else {
-    html += '<table class="scoreboard"><thead><tr>' +
+    html += '<div class="table-wrap"><table class="scoreboard"><thead><tr>' +
       '<th>Rank</th><th>Name</th><th>Points</th><th>Elo</th><th>Played</th><th>Won</th><th>Drawn</th><th>Lost</th>' +
       '<th>Ippon For</th><th>Ippon Against</th>' +
       '</tr></thead><tbody>';
@@ -1126,7 +1151,7 @@ function renderScoreboard() {
         '<td>' + r.played + '</td><td>' + r.won + '</td><td>' + r.drawn + '</td><td>' + r.lost + '</td>' +
         '<td>' + r.ipFor + '</td><td>' + r.ipAgainst + '</td></tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
   }
   if (appState.updatedAt) {
     var d = new Date(appState.updatedAt);
@@ -1386,7 +1411,7 @@ function renderHallOfFame() {
     if (a && a.override && a.override.length) cell += ' <span class="badge overridden">Overridden</span>';
     return cell;
   }
-  html += '<table class="hof"><thead><tr><th>Award</th><th>Winner</th>' + (isEditor() ? '<th>Editor</th>' : '') + '</tr></thead><tbody>';
+  html += '<div class="table-wrap"><table class="hof"><thead><tr><th>Award</th><th>Winner</th>' + (isEditor() ? '<th>Editor</th>' : '') + '</tr></thead><tbody>';
   // Points: Gold, Silver, Bronze in one row, each with its own override.
   html += '<tr><td><span class="hof-place">Points</span><br><span class="hof-detail">Gold, Silver, Bronze by points</span></td><td>' +
     ['gold', 'silver', 'bronze'].map(function (key) {
@@ -1423,7 +1448,7 @@ function renderHallOfFame() {
     if (isEditor()) html += '<td>' + hofAwardControl(key, awards[key]) + '</td>';
     html += '</tr>';
   });
-  html += '</tbody></table></div>';
+  html += '</tbody></table></div></div>';
   el.innerHTML = html;
 }
 
@@ -1453,7 +1478,7 @@ async function renderAdmin() {
   if (!adminUsers.length) {
     html += '<p class="empty">No users yet.</p>';
   } else {
-    html += '<table class="scoreboard"><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Fighter</th><th>Password</th><th></th></tr></thead><tbody>';
+    html += '<div class="table-wrap"><table class="scoreboard"><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Fighter</th><th>Password</th><th></th></tr></thead><tbody>';
     adminUsers.forEach(function (u) {
       var fighter = u.playerId ? playerName(u.playerId) : '';
       html += '<tr><td><strong>' + esc(u.username) + '</strong></td><td>' + esc(u.name || '') + '</td>' +
@@ -1471,7 +1496,7 @@ async function renderAdmin() {
           '<button class="btn small danger" data-action="admin-delete-user" data-user="' + esc(u.username) + '">Delete</button>') +
         '</div></td></tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
   }
   html += '<h3>Create a user</h3>' +
     '<div class="btnrow">' +
