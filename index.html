@@ -134,6 +134,26 @@
     white-space: nowrap;
   }
   .badge.complete { background: #e8edf1; color: var(--muted); }
+  .badge.active { background: #e6f4ea; color: #1e7d32; }
+  .badge.inactive { background: #fdeeee; color: var(--red-ink); }
+  .badge.overridden { background: #fff3e0; color: #7a4a00; }
+  /* Hall of Fame */
+  table.hof { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.hof th {
+    background: var(--navy);
+    color: #fff;
+    text-align: left;
+    padding: 9px 8px;
+    white-space: nowrap;
+  }
+  table.hof td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.hof tr:nth-child(even) td { background: var(--bg); }
+  .hof-place { font-weight: 700; color: var(--navy); white-space: nowrap; }
+  .hof-winner { font-weight: 700; }
+  .hof-detail { color: var(--muted); font-size: 13px; }
+  .hof-ctrl { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+  .hof-ctrl select { padding: 6px 8px; max-width: 180px; }
+  .hof-note { color: var(--muted); font-size: 13px; }
   .sched-edit { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; width: 100%; }
   .sched-edit input, .sched-edit select { padding: 6px 8px; }
   /* Turns and matches */
@@ -359,6 +379,7 @@
     <button class="tab" data-tab="results">Results</button>
     <button class="tab" data-tab="scoreboard">Scoreboard</button>
     <button class="tab" data-tab="fighters">Fighters</button>
+    <button class="tab" data-tab="halloffame" id="hofTabBtn">Hall of Fame</button>
   </nav>
 </header>
 
@@ -368,6 +389,7 @@
   <section id="tab-results" class="tabpage" hidden></section>
   <section id="tab-scoreboard" class="tabpage" hidden></section>
   <section id="tab-fighters" class="tabpage" hidden></section>
+  <section id="tab-halloffame" class="tabpage" hidden></section>
 </main>
 
 <footer id="pageFooter">Dublin Kendo Kobukai · Dublin Shiai League 2027</footer>
@@ -550,6 +572,8 @@ function render() {
   renderResults();
   renderScoreboard();
   renderFighters();
+  renderHallOfFame();
+  updateHofTabVisibility();
   updateAuthUI();
   window.scrollTo(0, y);
 }
@@ -986,7 +1010,9 @@ function renderScoreboard() {
       '<th>Ippon For</th><th>Ippon Against</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r, i) {
-      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + '</td><td><strong>' + r.points + '</strong></td><td>' + r.elo + '</td>' +
+      var active = isPlayerActive(r.id);
+      html += '<tr><td>' + (i + 1) + '</td><td>' + esc(r.name) + ' ' +
+        '<span class="badge ' + (active ? 'active' : 'inactive') + '">' + (active ? 'Active' : 'Inactive') + '</span></td><td><strong>' + r.points + '</strong></td><td>' + r.elo + '</td>' +
         '<td>' + r.played + '</td><td>' + r.won + '</td><td>' + r.drawn + '</td><td>' + r.lost + '</td>' +
         '<td>' + r.ipFor + '</td><td>' + r.ipAgainst + '</td></tr>';
     });
@@ -1128,14 +1154,173 @@ function renderFighters() {
   el.innerHTML = html;
 }
 
+/* ---------- Hall of Fame ---------- */
+
+// The Hall of Fame for the selected season, or null if the backend did
+// not return one (older deployments).
+function hallOfFame() {
+  if (!appState || !appState.hallOfFame) return null;
+  return appState.hallOfFame[String(selectedSeason)] || null;
+}
+
+function hofVisibleToViewers() {
+  var hof = hallOfFame();
+  return !!(hof && hof.visible);
+}
+
+// The tab is shown to editors always, and to viewers only once an
+// editor has published that season's Hall of Fame.
+function hofTabVisible() {
+  return isEditor() || hofVisibleToViewers();
+}
+
+// Whether a player is Active in the selected season: they attended the
+// latest completed turn (or everyone is Active when no turn is complete
+// yet). Prefers the backend's list; falls back to the same rule computed
+// from the turns and player selections the page already has.
+function isPlayerActive(pid) {
+  var hof = hallOfFame();
+  if (hof && hof.activePlayerIds) return hof.activePlayerIds.indexOf(pid) !== -1;
+  var seasonTurns = (appState.turns || []).filter(function (t) { return turnYear(t) === selectedSeason; });
+  var latestComplete = null;
+  seasonTurns.forEach(function (t) {
+    if (t.status === 'Complete' && (!latestComplete || (t.date || '') > (latestComplete.date || ''))) latestComplete = t;
+  });
+  if (!latestComplete) return true;
+  return (appState.turnPlayers || []).some(function (tp) { return tp.turnId === latestComplete.id && tp.playerId === pid; });
+}
+
+function updateHofTabVisibility() {
+  var btn = document.getElementById('hofTabBtn');
+  if (btn) btn.hidden = !hofTabVisible();
+  // If the user is on the Hall of Fame tab and it just became hidden
+  // (e.g. the season changed to one that is not published), move them
+  // back to the Schedule tab.
+  if (currentTab === 'halloffame' && !hofTabVisible()) setTab('schedule');
+}
+
+// One award's winner names, joined, or a placeholder when unassigned.
+function hofWinnerNames(award) {
+  if (!award || !award.winner || !award.winner.length) return '';
+  return award.winner.map(function (id) { return playerName(id); }).filter(function (n) { return !!n; }).join(', ');
+}
+
+// The editor control for one award: a player dropdown, a Set button to
+// override (or pick) the winner, and a Clear button when one is stored.
+// Highest Attendance can have several auto winners on a tie; the
+// override picks a single winner.
+function hofAwardControl(awardKey, award) {
+  if (!isEditor()) return '';
+  var players = appState.players.slice().sort(compareName);
+  var current = award && award.override ? award.override[0] : (award && award.winner && award.winner.length ? award.winner[0] : '');
+  // For a manual award the stored winner is the choice; for an auto
+  // award the dropdown defaults to the current winner so the editor
+  // can keep it or pick someone else.
+  var html = '<div class="hof-ctrl"><select id="hof-' + awardKey + '" aria-label="Winner for ' + esc(awardKey) + '">' +
+    '<option value="">Choose a player</option>' +
+    players.map(function (pl) {
+      return '<option value="' + esc(pl.id) + '"' + (pl.id === current ? ' selected' : '') + '>' + esc(pl.name) + (isPlayerActive(pl.id) ? '' : ' (Inactive)') + '</option>';
+    }).join('') +
+    '</select>' +
+    '<button class="btn small" data-action="hof-set-award" data-award="' + esc(awardKey) + '">Set</button>';
+  var isAuto = award && award.auto !== null && award.auto !== undefined;
+  // Only a stored value gets a Clear button: an override for an auto
+  // award (revert to the calculated winner), or the stored winner for
+  // a manual award. An auto award with no override has nothing to clear.
+  var hasStored = false;
+  if (award) {
+    if (isAuto) hasStored = !!(award.override && award.override.length);
+    else hasStored = !!(award.winner && award.winner.length);
+  }
+  if (hasStored) {
+    html += '<button class="btn small ghost" data-action="hof-clear-award" data-award="' + esc(awardKey) + '">' +
+      (isAuto ? 'Revert to auto' : 'Clear') + '</button>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderHallOfFame() {
+  var el = document.getElementById('tab-halloffame');
+  if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
+  var hof = hallOfFame();
+  var html = '<div class="panel"><h2>Hall of Fame</h2>';
+  html += '<p class="hof-note">Annual awards for the ' + selectedSeason + ' season, shared at the end of the season. ' +
+    'Only Active players (attended the latest completed turn) are eligible for the automatic awards.</p>';
+  if (isEditor()) {
+    if (hofVisibleToViewers()) {
+      html += '<p><span class="badge active">Visible to viewers</span> ' +
+        '<button class="btn small" data-action="hof-toggle-visible">Hide from viewers</button></p>';
+    } else {
+      html += '<p><span class="badge inactive">Editors only</span> ' +
+        '<button class="btn small" data-action="hof-toggle-visible">Make visible to viewers</button></p>';
+    }
+  }
+  if (!hof || !hof.awards) {
+    html += '<p class="empty">No Hall of Fame data for ' + selectedSeason + ' yet.</p></div>';
+    el.innerHTML = html;
+    return;
+  }
+  var awards = hof.awards;
+  function awardCell(key, label, desc) {
+    var a = awards[key];
+    var names = hofWinnerNames(a);
+    var cell = '<span class="hof-winner">' + (names ? esc(names) : '<span class="hof-detail">Not yet chosen</span>') + '</span>';
+    if (a && a.detail) cell += ' <span class="hof-detail">(' + esc(a.detail) + ')</span>';
+    if (a && a.override && a.override.length) cell += ' <span class="badge overridden">Overridden</span>';
+    return cell;
+  }
+  html += '<table class="hof"><thead><tr><th>Award</th><th>Winner</th>' + (isEditor() ? '<th>Editor</th>' : '') + '</tr></thead><tbody>';
+  // Points: Gold, Silver, Bronze in one row, each with its own override.
+  html += '<tr><td><span class="hof-place">Points</span><br><span class="hof-detail">Gold, Silver, Bronze by points</span></td><td>' +
+    ['gold', 'silver', 'bronze'].map(function (key) {
+      var label = key.charAt(0).toUpperCase() + key.slice(1);
+      var a = awards[key];
+      var names = hofWinnerNames(a);
+      var line = '<span class="hof-place">' + label + ':</span> ' +
+        (names ? '<span class="hof-winner">' + esc(names) + '</span>' : '<span class="hof-detail">Not yet chosen</span>');
+      if (a && a.detail) line += ' <span class="hof-detail">(' + esc(a.detail) + ')</span>';
+      if (a && a.override && a.override.length) line += ' <span class="badge overridden">Overridden</span>';
+      return line;
+    }).join('<br>') + '</td>';
+  if (isEditor()) {
+    html += '<td>' + ['gold', 'silver', 'bronze'].map(function (key) { return hofAwardControl(key, awards[key]); }).join('') + '</td>';
+  }
+  html += '</tr>';
+  // The remaining automatic awards, one row each.
+  [['mostGains', 'Most Gains', 'Highest Elo'],
+   ['sharpestShooter', 'Sharpest Shooter', 'Most ippons per match'],
+   ['comeback', 'Comeback', 'Biggest Elo recovery (lowest to year-end)'],
+   ['highestAttendance', 'Highest Attendance', 'Most turns attended']].forEach(function (row) {
+    var key = row[0], label = row[1], desc = row[2];
+    html += '<tr><td><span class="hof-place">' + esc(label) + '</span><br><span class="hof-detail">' + esc(desc) + '</span></td>' +
+      '<td>' + awardCell(key, label, desc) + '</td>';
+    if (isEditor()) html += '<td>' + hofAwardControl(key, awards[key]) + '</td>';
+    html += '</tr>';
+  });
+  // The two manual awards.
+  [['fightingSpirit', 'Fighting Spirit', 'Best embodied the virtues of kendo'],
+   ['bestShinpan', 'Best Shinpan', 'Best refereeing']].forEach(function (row) {
+    var key = row[0], label = row[1], desc = row[2];
+    html += '<tr><td><span class="hof-place">' + esc(label) + '</span><br><span class="hof-detail">' + esc(desc) + '</span></td>' +
+      '<td>' + awardCell(key, label, desc) + '</td>';
+    if (isEditor()) html += '<td>' + hofAwardControl(key, awards[key]) + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
 /* ---------- actions ---------- */
 
 function setTab(name) {
+  // The Hall of Fame tab is only open when it is visible to this user.
+  if (name === 'halloffame' && !hofTabVisible()) name = 'schedule';
   currentTab = name;
   document.querySelectorAll('.tab').forEach(function (b) {
     b.classList.toggle('active', b.dataset.tab === name);
   });
-  ['schedule', 'results', 'scoreboard', 'fighters'].forEach(function (t) {
+  ['schedule', 'results', 'scoreboard', 'fighters', 'halloffame'].forEach(function (t) {
     document.getElementById('tab-' + t).hidden = (t !== name);
   });
 }
@@ -1222,6 +1407,27 @@ async function handleAction(action, target) {
       var toRoundComplete = !roundComplete;
       await api('setRoundComplete', { turnId: turnId, round: roundNum, complete: toRoundComplete });
       showStatus(toRoundComplete ? 'Round ' + roundNum + ' marked complete.' : 'Round ' + roundNum + ' unmarked (no longer complete).');
+    } else if (action === 'hof-toggle-visible') {
+      // Publish (or unpublish) this season's Hall of Fame to viewers.
+      var toVisible = !hofVisibleToViewers();
+      await api('setHallOfFameVisible', { season: selectedSeason, visible: toVisible });
+      showStatus(toVisible ? 'Hall of Fame is now visible to viewers.' : 'Hall of Fame is now editors only.');
+    } else if (action === 'hof-set-award') {
+      // Set the stored winner for one award: an override for an auto
+      // award, or the winner for a manual award. An empty choice does
+      // nothing; use the Clear button to remove a stored winner.
+      var awardKey = target.dataset.award;
+      var sel = document.getElementById('hof-' + awardKey);
+      var pickId = sel ? sel.value : '';
+      if (!pickId) { showStatus('Choose a player first.', true); return; }
+      await api('setHallOfFameAward', { season: selectedSeason, award: awardKey, playerIds: [pickId] });
+      showStatus('Hall of Fame award updated.');
+    } else if (action === 'hof-clear-award') {
+      // Remove the stored winner: an auto award reverts to its
+      // calculated winner, a manual award becomes unassigned.
+      var clearKey = target.dataset.award;
+      await api('setHallOfFameAward', { season: selectedSeason, award: clearKey, playerIds: [] });
+      showStatus('Hall of Fame award cleared.');
     } else if (action === 'add-fighting-spirit') {
       var fsAdd = document.getElementById('fs-add-' + turnId);
       var addId = fsAdd ? fsAdd.value : '';
