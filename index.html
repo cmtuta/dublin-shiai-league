@@ -585,7 +585,10 @@ function renderSchedule() {
     if (t.fightingSpiritName) {
       html += '<span class="sched-notes">Fighting Spirit: ' + esc(t.fightingSpiritName) + '</span>';
     }
-    if (isEditor()) {
+    if (t.status === 'Complete') {
+      html += '<span class="badge complete">Complete</span>';
+    }
+    if (isEditor() && t.status !== 'Complete') {
       if (editingTurnDate === t.id) {
         html += '<div class="sched-edit">' +
           '<input type="date" id="te-date-' + esc(t.id) + '" value="' + esc(t.date) + '">' +
@@ -686,14 +689,21 @@ function matchPlayerOptionsHtml(turn, currentId) {
 
 function matchCardHtml(m, turn) {
   var meta = esc(turn.name) + ' · Round ' + m.round + ' · Match ' + matchNum(m.id);
-  var pill = '<span class="pill' + (m.completed ? '' : ' hidden') + '">Completed</span>';
-  var delBtn = isEditor()
+  // A match shows as Completed when its round is marked complete or its
+  // turn is, not merely when a result was recorded. A locked match is
+  // read-only even for an editor: it renders exactly like the public
+  // view (names as text, initials in the centre, no delete button)
+  // until its round (or the turn) is unmarked complete.
+  var locked = !!m.roundComplete || turn.status === 'Complete';
+  var showEditor = isEditor() && !locked;
+  var pill = '<span class="pill' + (locked ? '' : ' hidden') + '">Completed</span>';
+  var delBtn = showEditor
     ? '<button class="btn small danger" data-action="delete-match" data-match="' + esc(m.id) + '">Delete match</button>'
     : '';
-  var whiteSide = isEditor()
+  var whiteSide = showEditor
     ? '<select data-f="whitePlayer" title="White fighter" aria-label="White fighter">' + matchPlayerOptionsHtml(turn, m.whiteId) + '</select>'
     : '<span>' + esc(playerName(m.whiteId)) + '</span>';
-  var redSide = isEditor()
+  var redSide = showEditor
     ? '<select data-f="redPlayer" title="Red fighter" aria-label="Red fighter">' + matchPlayerOptionsHtml(turn, m.redId) + '</select>'
     : '<span>' + esc(playerName(m.redId)) + '</span>';
   // Nationals-style centre: one type dropdown per ippon slot (two per
@@ -703,7 +713,7 @@ function matchCardHtml(m, turn) {
   // There is no ippon-count dropdown and no Save button: changing any
   // dropdown saves the match automatically.
   var centreInner;
-  if (isEditor()) {
+  if (showEditor) {
     var wTypes = effectiveTypes(m, 'white');
     var rTypes = effectiveTypes(m, 'red');
     centreInner = '<div class="centre-row">' +
@@ -741,6 +751,14 @@ function turnPlayersHtml(turnId) {
 }
 
 function turnAdminHtml(t) {
+  // A completed turn is fully locked: no player, round, Fighting Spirit
+  // or date changes. Only the Unmark complete button stays, so the
+  // turn can be reopened.
+  if (t.status === 'Complete') {
+    return '<div class="turn-admin"><p class="hint">This turn is marked complete. Nothing in it can be edited until it is unmarked.</p><div class="btnrow">' +
+      '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">Unmark complete</button>' +
+    '</div></div>';
+  }
   var selected = {};
   appState.turnPlayers.forEach(function (tp) {
     if (tp.turnId === t.id) selected[tp.playerId] = true;
@@ -818,10 +836,20 @@ function turnPanelHtml(t) {
     Object.keys(byRound).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
       var key = t.id + ':' + r;
       var collapsed = !!collapsedRounds[key];
+      // A round is complete when it is marked complete or its turn is.
+      // The Mark/Unmark button is editor-only and hidden while the turn
+      // is complete, since a round cannot be unmarked on its own then.
+      var roundComplete = t.status === 'Complete' || byRound[r].some(function (m) { return m.roundComplete; });
+      var roundBtn = '';
+      if (isEditor() && t.status !== 'Complete') {
+        roundBtn = '<button class="btn small" data-action="mark-round-complete" data-turn="' + esc(t.id) + '" data-round="' + r + '">' + (roundComplete ? 'Unmark complete' : 'Mark complete') + '</button>';
+      }
       html += '<div class="round-head">' +
         '<button class="btn small ghost round-toggle" data-action="toggle-round" data-turn="' + esc(t.id) + '" data-round="' + r + '" aria-expanded="' + (!collapsed) + '" aria-label="' + (collapsed ? 'Expand' : 'Collapse') + ' round ' + r + '">' + (collapsed ? '▸' : '▾') + '</button>' +
         '<span>Round ' + r + '</span>' +
-        (isEditor() ? '<button class="btn small danger" data-action="delete-round" data-turn="' + esc(t.id) + '" data-round="' + r + '">Delete round</button>' : '') +
+        (roundComplete ? '<span class="badge complete">Complete</span>' : '') +
+        roundBtn +
+        (isEditor() && !roundComplete ? '<button class="btn small danger" data-action="delete-round" data-turn="' + esc(t.id) + '" data-round="' + r + '">Delete round</button>' : '') +
       '</div>';
       // Who sat out this round (recorded when the round was generated,
       // usually the one player left over when the count is odd).
@@ -1182,6 +1210,18 @@ async function handleAction(action, target) {
       var toComplete = !turn || turn.status !== 'Complete';
       await api('setTurnStatus', { turnId: turnId, status: toComplete ? 'Complete' : '' });
       showStatus(toComplete ? 'Turn marked complete.' : 'Turn unmarked (no longer complete).');
+    } else if (action === 'mark-round-complete') {
+      // Toggle one round: marking it locks its matches and shows them as
+      // complete; unmarking reopens them. The server refuses to unmark a
+      // round while its turn is complete.
+      var roundNum = parseInt(target.dataset.round, 10) || 0;
+      var roundComplete = false;
+      (appState.matches || []).forEach(function (m) {
+        if (m.turnId === turnId && m.round === roundNum && m.roundComplete) roundComplete = true;
+      });
+      var toRoundComplete = !roundComplete;
+      await api('setRoundComplete', { turnId: turnId, round: roundNum, complete: toRoundComplete });
+      showStatus(toRoundComplete ? 'Round ' + roundNum + ' marked complete.' : 'Round ' + roundNum + ' unmarked (no longer complete).');
     } else if (action === 'add-fighting-spirit') {
       var fsAdd = document.getElementById('fs-add-' + turnId);
       var addId = fsAdd ? fsAdd.value : '';
