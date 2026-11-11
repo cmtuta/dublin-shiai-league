@@ -370,7 +370,7 @@
     </div>
     <div class="head-right">
       <span id="loginState"></span>
-      <button id="loginBtn" class="btn light">Editor login</button>
+      <button id="loginBtn" class="btn light">Login</button>
       <button id="logoutBtn" class="btn light" hidden>Log out</button>
     </div>
   </div>
@@ -380,6 +380,7 @@
     <button class="tab" data-tab="scoreboard">Scoreboard</button>
     <button class="tab" data-tab="fighters">Fighters</button>
     <button class="tab" data-tab="halloffame" id="hofTabBtn">Hall of Fame</button>
+    <button class="tab" data-tab="admin" id="adminTabBtn" hidden>Admin</button>
   </nav>
 </header>
 
@@ -390,6 +391,7 @@
   <section id="tab-scoreboard" class="tabpage" hidden></section>
   <section id="tab-fighters" class="tabpage" hidden></section>
   <section id="tab-halloffame" class="tabpage" hidden></section>
+  <section id="tab-admin" class="tabpage" hidden></section>
 </main>
 
 <footer id="pageFooter">Dublin Kendo Kobukai · Dublin Shiai League 2027</footer>
@@ -398,7 +400,7 @@
 
 <div id="loginModal" class="modal" hidden>
   <div class="modal-card">
-    <h2>Editor login</h2>
+    <h2>Login</h2>
     <form id="loginForm">
       <label>Username
         <input id="loginUser" type="text" autocomplete="username" required>
@@ -419,7 +421,15 @@
 const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxLDxB_UVzAxepjPToFO78-atoZZcFGfbSZX0bzr6IOyAuXZNuAfqkPpeO6lrSDYZWO/exec";
 
 var appState = null;
-var editorCreds = null;
+// The app is hidden behind a login, even for viewers. A session is a
+// token from the server (stored here, sent with every request); the
+// logged-in user and their role come back with getState. Roles:
+// 'viewer' (read-only), 'editor' (can make changes), 'admin' (the
+// dublinshiaileague account only, sees the Admin tab).
+var sessionToken = null;
+var currentUser = null;
+var adminUsers = null; // user list for the Admin tab, fetched on demand
+try { sessionToken = localStorage.getItem('dsl_token') || null; } catch (err) { /* private mode */ }
 var currentTab = 'schedule';
 var editingTurnDate = null;
 var statusTimer = null;
@@ -493,8 +503,16 @@ function esc(s) {
   });
 }
 
+function isLoggedIn() {
+  return !!sessionToken;
+}
+
 function isEditor() {
-  return !!editorCreds;
+  return !!(currentUser && (currentUser.role === 'editor' || currentUser.role === 'admin'));
+}
+
+function isAdmin() {
+  return !!(currentUser && currentUser.role === 'admin');
 }
 
 function showStatus(msg, isError) {
@@ -541,15 +559,40 @@ async function fetchState() {
     showStatus('Add the Apps Script web app URL to WEBAPP_URL in index.html.', true);
     return;
   }
+  if (!sessionToken) {
+    // Not logged in: the app is hidden behind a login, so show the
+    // login form and a prompt instead of the league content.
+    appState = null;
+    currentUser = null;
+    render();
+    document.getElementById('loginModal').hidden = false;
+    return;
+  }
   try {
     // Cache-buster: without it the browser (or the Apps Script front
     // end) can serve the previous getState response, so a change made by
     // an action (Hall of Fame toggle, override, round complete) would
     // only show after a reload even though fetchState re-rendered.
-    var res = await fetch(WEBAPP_URL + '?action=getState&t=' + Date.now());
+    var res = await fetch(WEBAPP_URL + '?action=getState&token=' + encodeURIComponent(sessionToken) + '&t=' + Date.now());
     var data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Could not load the league data.');
+    if (!data.ok) {
+      if (data.error === 'Login required.') {
+        // The session is gone (logged out elsewhere, or the Admin
+        // deleted the user): drop the token and ask to log in again.
+        sessionToken = null;
+        currentUser = null;
+        adminUsers = null;
+        try { localStorage.removeItem('dsl_token'); } catch (err) { /* private mode */ }
+        appState = null;
+        render();
+        document.getElementById('loginModal').hidden = false;
+        showStatus('Your session ended. Please log in again.', true);
+        return;
+      }
+      throw new Error(data.error || 'Could not load the league data.');
+    }
     appState = data;
+    currentUser = data.currentUser || null;
     // Defensive: older backends returned a single Fighting Spirit id
     // (a string) instead of a list; normalise it so the list code below
     // never breaks during a deploy.
@@ -568,10 +611,7 @@ async function fetchState() {
 
 async function api(action, payload) {
   var body = { action: action };
-  if (editorCreds) {
-    body.username = editorCreds.username;
-    body.password = editorCreds.password;
-  }
+  if (sessionToken) body.token = sessionToken;
   if (payload) {
     for (var k in payload) body[k] = payload[k];
   }
@@ -590,21 +630,50 @@ async function api(action, payload) {
 function render() {
   var y = window.scrollY;
   applySeasonChrome();
+  if (!isLoggedIn() || !appState) {
+    // Hidden behind a login: show a prompt in every tab until the user
+    // logs in. The login modal is opened by fetchState.
+    var prompt = '<div class="panel"><h2>Login required</h2><p>Please log in to view the Dublin Shiai League.</p>' +
+      '<p><button class="btn" data-action="open-login">Login</button></p></div>';
+    ['schedule', 'results', 'scoreboard', 'fighters', 'halloffame', 'admin'].forEach(function (tab) {
+      var sec = document.getElementById('tab-' + tab);
+      if (sec) sec.innerHTML = prompt;
+    });
+    updateHofTabVisibility();
+    updateAdminTabVisibility();
+    updateAuthUI();
+    window.scrollTo(0, y);
+    return;
+  }
   renderSchedule();
   renderResults();
   renderScoreboard();
   renderFighters();
   renderHallOfFame();
+  renderAdmin();
   updateHofTabVisibility();
+  updateAdminTabVisibility();
   updateAuthUI();
   window.scrollTo(0, y);
 }
 
 function updateAuthUI() {
-  document.getElementById('loginBtn').hidden = isEditor();
-  document.getElementById('logoutBtn').hidden = !isEditor();
-  document.getElementById('loginState').textContent =
-    isEditor() ? 'Logged in as ' + editorCreds.username : '';
+  document.getElementById('loginBtn').hidden = isLoggedIn();
+  document.getElementById('logoutBtn').hidden = !isLoggedIn();
+  var label = '';
+  if (currentUser) {
+    label = 'Logged in as ' + (currentUser.name || currentUser.username) +
+      (currentUser.role === 'admin' ? ' (admin)' : currentUser.role === 'editor' ? ' (editor)' : ' (viewer)');
+  }
+  document.getElementById('loginState').textContent = label;
+}
+
+// The Admin tab is only for the dublinshiaileague admin account.
+function updateAdminTabVisibility() {
+  var btn = document.getElementById('adminTabBtn');
+  if (!btn) return;
+  btn.hidden = !isAdmin();
+  if (!isAdmin() && currentTab === 'admin') setTab('schedule');
 }
 
 function renderSchedule() {
@@ -1358,18 +1427,79 @@ function renderHallOfFame() {
   el.innerHTML = html;
 }
 
+/* ---------- Admin (users) ---------- */
+
+// The Admin tab, only for the dublinshiaileague admin account. It lists
+// every login (username, name, role, linked fighter, password) with
+// controls to change the password or role, delete the user, and create
+// a new user. The user list is fetched on demand (not in getState) and
+// cached until the next Admin action refreshes it.
+async function renderAdmin() {
+  var el = document.getElementById('tab-admin');
+  if (!isAdmin()) { el.innerHTML = ''; return; }
+  if (!appState) { el.innerHTML = '<div class="panel"><p>Loading...</p></div>'; return; }
+  if (adminUsers === null) {
+    el.innerHTML = '<div class="panel"><p>Loading users...</p></div>';
+    try {
+      var data = await api('listUsers', {});
+      adminUsers = data.users || [];
+    } catch (err) {
+      el.innerHTML = '<div class="panel"><p class="error">' + esc(err.message || 'Could not load users.') + '</p></div>';
+      return;
+    }
+  }
+  var html = '<div class="panel"><h2>Admin: logins</h2>' +
+    '<p class="hof-note">Every fighter gets a login automatically when they are added (username firstnamelastname, random 10-digit password, viewer role). Change a password or role here, delete a login, or create a login for someone who is not a fighter. Only the dublinshiaileague account sees this tab.</p>';
+  if (!adminUsers.length) {
+    html += '<p class="empty">No users yet.</p>';
+  } else {
+    html += '<table class="scoreboard"><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Fighter</th><th>Password</th><th></th></tr></thead><tbody>';
+    adminUsers.forEach(function (u) {
+      var fighter = u.playerId ? playerName(u.playerId) : '';
+      html += '<tr><td><strong>' + esc(u.username) + '</strong></td><td>' + esc(u.name || '') + '</td>' +
+        '<td>' + esc(u.role) + '</td><td>' + esc(fighter) + '</td><td><code>' + esc(u.password) + '</code></td>' +
+        '<td><div class="btnrow">' +
+        '<input type="text" id="pw-' + esc(u.username) + '" placeholder="New password" size="12" autocomplete="off">' +
+        '<button class="btn small" data-action="admin-set-password" data-user="' + esc(u.username) + '">Set password</button>' +
+        '<button class="btn small" data-action="admin-new-password" data-user="' + esc(u.username) + '">Random password</button>' +
+        (u.username === 'dublinshiaileague' ? '' :
+          '<select id="role-' + esc(u.username) + '">' +
+          '<option value="viewer"' + (u.role === 'viewer' ? ' selected' : '') + '>Viewer</option>' +
+          '<option value="editor"' + (u.role === 'editor' ? ' selected' : '') + '>Editor</option>' +
+          '</select>' +
+          '<button class="btn small" data-action="admin-set-role" data-user="' + esc(u.username) + '">Set role</button>' +
+          '<button class="btn small danger" data-action="admin-delete-user" data-user="' + esc(u.username) + '">Delete</button>') +
+        '</div></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '<h3>Create a user</h3>' +
+    '<div class="btnrow">' +
+    '<input type="text" id="new-user-name" placeholder="Username (letters and digits)" autocomplete="off">' +
+    '<input type="text" id="new-user-pass" placeholder="Password (blank = random 10-digit)" autocomplete="off">' +
+    '<select id="new-user-role"><option value="viewer">Viewer</option><option value="editor">Editor</option></select>' +
+    '<button class="btn" data-action="admin-create-user">Create user</button>' +
+    '</div>' +
+    '<p class="hint">Usernames are lowercased and anything that is not a letter or digit is removed. A fighter added through the Fighters tab gets a login automatically, so you normally only create a user here for someone who is not a fighter.</p>' +
+    '</div>';
+  el.innerHTML = html;
+}
+
 /* ---------- actions ---------- */
 
 function setTab(name) {
-  // The Hall of Fame tab is only open when it is visible to this user.
+  // The Hall of Fame tab is only open when it is visible to this user,
+  // and the Admin tab only for the admin account.
   if (name === 'halloffame' && !hofTabVisible()) name = 'schedule';
+  if (name === 'admin' && !isAdmin()) name = 'schedule';
   currentTab = name;
   document.querySelectorAll('.tab').forEach(function (b) {
     b.classList.toggle('active', b.dataset.tab === name);
   });
-  ['schedule', 'results', 'scoreboard', 'fighters', 'halloffame'].forEach(function (t) {
+  ['schedule', 'results', 'scoreboard', 'fighters', 'halloffame', 'admin'].forEach(function (t) {
     document.getElementById('tab-' + t).hidden = (t !== name);
   });
+  if (name === 'admin') renderAdmin();
 }
 
 function readSelect(card, field) {
@@ -1475,6 +1605,57 @@ async function handleAction(action, target) {
       var clearKey = target.dataset.award;
       await api('setHallOfFameAward', { season: selectedSeason, award: clearKey, playerIds: [] });
       showStatus('Hall of Fame award cleared.');
+    } else if (action === 'open-login') {
+      // Local only: open the login form from the "Login required" prompt.
+      document.getElementById('loginModal').hidden = false;
+      document.getElementById('loginUser').focus();
+      return;
+    } else if (action === 'admin-set-password') {
+      // Set a login's password to the value typed in its row.
+      var pwUser = target.dataset.user;
+      var pwInput = document.getElementById('pw-' + pwUser);
+      var newPass = pwInput ? pwInput.value.trim() : '';
+      if (!newPass) { showStatus('Enter a new password first.', true); return; }
+      await api('updateUser', { username: pwUser, password: newPass });
+      adminUsers = null;
+      showStatus('Password updated for ' + pwUser + '.');
+    } else if (action === 'admin-new-password') {
+      // Give a login a fresh random 10-digit password and show it.
+      var rpUser = target.dataset.user;
+      var rpPass = String(1000000000 + Math.floor(Math.random() * 9000000000));
+      await api('updateUser', { username: rpUser, password: rpPass });
+      adminUsers = null;
+      showStatus('New password for ' + rpUser + ': ' + rpPass);
+    } else if (action === 'admin-set-role') {
+      // Change a login's role (viewer or editor).
+      var roleUser = target.dataset.user;
+      var roleSel = document.getElementById('role-' + roleUser);
+      var newRole = roleSel ? roleSel.value : '';
+      if (!newRole) return;
+      await api('updateUser', { username: roleUser, role: newRole });
+      adminUsers = null;
+      showStatus('Role updated for ' + roleUser + ' (' + newRole + ').');
+    } else if (action === 'admin-delete-user') {
+      var delUser = target.dataset.user;
+      if (!window.confirm('Delete the login for ' + delUser + '? This cannot be undone.')) return;
+      await api('deleteUser', { username: delUser });
+      adminUsers = null;
+      showStatus('Login deleted for ' + delUser + '.');
+    } else if (action === 'admin-create-user') {
+      // Create a login. A blank password means the server generates a
+      // random 10-digit one and returns it.
+      var newName = document.getElementById('new-user-name');
+      var newPassInput = document.getElementById('new-user-pass');
+      var newRoleSel = document.getElementById('new-user-role');
+      var uname = newName ? newName.value.trim() : '';
+      if (!uname) { showStatus('Enter a username first.', true); return; }
+      var created = await api('createUser', {
+        username: uname,
+        password: newPassInput ? newPassInput.value.trim() : '',
+        role: newRoleSel ? newRoleSel.value : 'viewer'
+      });
+      adminUsers = null;
+      showStatus('User created: ' + created.user.username + ' / ' + created.user.password + ' (' + created.user.role + ').');
     } else if (action === 'add-fighting-spirit') {
       var fsAdd = document.getElementById('fs-add-' + turnId);
       var addId = fsAdd ? fsAdd.value : '';
@@ -1643,8 +1824,12 @@ document.addEventListener('submit', async function (e) {
     var lastName = document.getElementById('npLast').value.trim();
     if (!firstName || !lastName) return;
     try {
-      await api('createPlayer', { firstName: firstName, lastName: lastName });
-      showStatus('Player added.');
+      var created = await api('createPlayer', { firstName: firstName, lastName: lastName });
+      // A login is created automatically for the new fighter; show it
+      // so it can be shared with them.
+      var loginMsg = 'Player added.';
+      if (created.login) loginMsg += ' Login: ' + created.login.username + ' / ' + created.login.password + ' (viewer).';
+      showStatus(loginMsg);
       await fetchState();
     } catch (err) {
       showStatus(err.message || 'Could not add the player.', true);
@@ -1695,12 +1880,15 @@ document.addEventListener('submit', async function (e) {
       });
       var data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Login failed.');
-      editorCreds = { username: user, password: pass };
-      sessionStorage.setItem('dsl_user', user);
-      sessionStorage.setItem('dsl_pass', pass);
+      // The server returns a session token; store it (not the password)
+      // and use it for every request from now on.
+      sessionToken = data.token;
+      currentUser = { username: data.username, role: data.role, name: data.name };
+      adminUsers = null;
+      try { localStorage.setItem('dsl_token', sessionToken); } catch (err) { /* private mode */ }
       document.getElementById('loginModal').hidden = true;
       errEl.hidden = true;
-      showStatus('Logged in as editor.');
+      showStatus('Logged in as ' + (data.name || data.username) + '.');
       await fetchState();
     } catch (err) {
       errEl.textContent = err.message || 'Login failed.';
@@ -1721,12 +1909,24 @@ document.getElementById('loginCancel').addEventListener('click', function () {
   document.getElementById('loginError').hidden = true;
 });
 
-document.getElementById('logoutBtn').addEventListener('click', function () {
-  editorCreds = null;
-  sessionStorage.removeItem('dsl_user');
-  sessionStorage.removeItem('dsl_pass');
+document.getElementById('logoutBtn').addEventListener('click', async function () {
+  if (sessionToken) {
+    try {
+      await fetch(WEBAPP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'logout', token: sessionToken })
+      });
+    } catch (err) { /* the session ends locally either way */ }
+  }
+  sessionToken = null;
+  currentUser = null;
+  adminUsers = null;
+  appState = null;
+  try { localStorage.removeItem('dsl_token'); } catch (err) { /* private mode */ }
   showStatus('Logged out.');
   render();
+  document.getElementById('loginModal').hidden = false;
 });
 
 document.querySelectorAll('.tab').forEach(function (b) {
@@ -1740,29 +1940,6 @@ document.getElementById('toTopBtn').addEventListener('click', function () {
 window.addEventListener('scroll', function () {
   document.getElementById('toTopBtn').hidden = window.scrollY < 300;
 });
-
-async function restoreSession() {
-  var user = sessionStorage.getItem('dsl_user');
-  var pass = sessionStorage.getItem('dsl_pass');
-  if (!user || !pass || !WEBAPP_URL) return;
-  try {
-    var res = await fetch(WEBAPP_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'login', username: user, password: pass })
-    });
-    var data = await res.json();
-    if (data.ok) {
-      editorCreds = { username: user, password: pass };
-    } else {
-      sessionStorage.removeItem('dsl_user');
-      sessionStorage.removeItem('dsl_pass');
-    }
-  } catch (err) {
-    // Stay logged out; the next fetch will show the load error.
-  }
-  updateAuthUI();
-}
 
 /* ---------- polling ---------- */
 
@@ -1782,7 +1959,9 @@ document.addEventListener('visibilitychange', function () {
 
 /* ---------- start ---------- */
 
-restoreSession().then(fetchState);
+// The token (if any) is already read from localStorage above; fetchState
+// validates it and opens the login form when there is none or it is gone.
+fetchState();
 </script>
 </body>
 </html>
