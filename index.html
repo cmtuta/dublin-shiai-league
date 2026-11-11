@@ -603,8 +603,12 @@ function renderSchedule() {
   el.innerHTML = html;
 }
 
-function ipponSlot(count, n) {
-  return '<span class="slot ippon' + (count >= n ? ' on' : '') + '">●</span>';
+// One ippon slot in public view: shows the type initial (M, K, D, T, H, I)
+// when the slot holds an ippon, and stays an invisible fixed placeholder
+// when empty so the layout never shifts.
+function ipponSlot(type) {
+  var initial = type ? IPPON_INITIALS[type] : '';
+  return '<span class="slot ippon' + (type ? ' on' : '') + '">' + (initial || '&nbsp;') + '</span>';
 }
 
 function hansokuSlot(count) {
@@ -614,10 +618,14 @@ function hansokuSlot(count) {
 
 function centreHtml(m) {
   // Outside to inside: hansoku, first ippon, second ippon, score, second ippon, first ippon, hansoku.
+  // The ippon slots show the type initial in public view too, not just in
+  // the editor dropdowns; an untyped ippon shows as generic Ippon (I).
+  var wTypes = effectiveTypes(m, 'white');
+  var rTypes = effectiveTypes(m, 'red');
   return hansokuSlot(m.whiteHansoku) +
-    ipponSlot(m.whiteIppon, 1) + ipponSlot(m.whiteIppon, 2) +
+    ipponSlot(wTypes[0]) + ipponSlot(wTypes[1]) +
     '<span class="score">' + m.whiteIppon + ' - ' + m.redIppon + '</span>' +
-    ipponSlot(m.redIppon, 2) + ipponSlot(m.redIppon, 1) +
+    ipponSlot(rTypes[1]) + ipponSlot(rTypes[0]) +
     hansokuSlot(m.redHansoku);
 }
 
