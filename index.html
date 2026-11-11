@@ -542,7 +542,11 @@ async function fetchState() {
     return;
   }
   try {
-    var res = await fetch(WEBAPP_URL + '?action=getState');
+    // Cache-buster: without it the browser (or the Apps Script front
+    // end) can serve the previous getState response, so a change made by
+    // an action (Hall of Fame toggle, override, round complete) would
+    // only show after a reload even though fetchState re-rendered.
+    var res = await fetch(WEBAPP_URL + '?action=getState&t=' + Date.now());
     var data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not load the league data.');
     appState = data;
@@ -814,11 +818,26 @@ function turnAdminHtml(t) {
       (selected[p.id] ? ' checked' : '') + '> ' + esc(p.name) + '</label>';
   });
   if (!appState.players.length) html += '<span class="empty">No players yet. Add a player above first.</span>';
+  // A new round cannot be generated until the previous round is marked
+  // complete (the first round in a turn has no previous round). The
+  // server enforces the same rule; the button is disabled here so the
+  // recorder sees why.
+  var prevRound = 0;
+  (appState.matches || []).forEach(function (m) {
+    if (m.turnId === t.id && m.round > prevRound) prevRound = m.round;
+  });
+  var prevRoundComplete = prevRound === 0 || t.status === 'Complete' ||
+    (appState.matches || []).some(function (m) {
+      return m.turnId === t.id && m.round === prevRound && m.roundComplete;
+    });
   html += '</div><div class="btnrow">' +
     '<button class="btn" data-action="save-turn-players" data-turn="' + esc(t.id) + '">Save players</button>' +
-    '<button class="btn" data-action="generate-round" data-turn="' + esc(t.id) + '">Generate next round</button>' +
+    '<button class="btn" data-action="generate-round" data-turn="' + esc(t.id) + '"' + (prevRoundComplete ? '' : ' disabled') + '>Generate next round</button>' +
     '<button class="btn" data-action="mark-complete" data-turn="' + esc(t.id) + '">' + (t.status === 'Complete' ? 'Unmark complete' : 'Mark complete') + '</button>' +
   '</div>';
+  if (!prevRoundComplete) {
+    html += '<p class="hint">Mark Round ' + prevRound + ' complete before generating the next round.</p>';
+  }
   var competing = appState.players.filter(function (p) { return selected[p.id]; }).sort(compareName);
   html += '<h3>Fighting Spirit awards</h3><div class="btnrow">';
   if (!competing.length) {
@@ -980,10 +999,12 @@ function scoreboardRows() {
   });
   var byId = {};
   rows.forEach(function (r) { byId[r.id] = r; });
-  // Only matches in turns of the selected season count. Elo is the
-  // player's current (global) rating, which carries over year to year.
+  // Only matches that count feed the scoreboard: a match counts when its
+  // round is marked complete or its turn is. An unrecorded match that
+  // counts is a 0-0 draw (1 point each, no ippons). Elo is the player's
+  // current (global) rating, which carries over year to year.
   appState.matches.forEach(function (m) {
-    if (!m.completed) return;
+    if (!m.counts) return;
     if (!seasonIncludes(turnYearById[m.turnId])) return;
     var w = byId[m.whiteId];
     var r = byId[m.redId];
@@ -994,13 +1015,14 @@ function scoreboardRows() {
     w.ipAgainst += m.redIppon;
     r.ipFor += m.redIppon;
     r.ipAgainst += m.whiteIppon;
-    if (m.result === 'White') {
+    var res = m.completed ? m.result : 'Draw';
+    if (res === 'White') {
       w.won++; r.lost++;
       w.points += s.winPoints; r.points += s.lossPoints;
-    } else if (m.result === 'Red') {
+    } else if (res === 'Red') {
       r.won++; w.lost++;
       r.points += s.winPoints; w.points += s.lossPoints;
-    } else if (m.result === 'Draw') {
+    } else if (res === 'Draw') {
       w.drawn++; r.drawn++;
       w.points += s.drawPoints; r.points += s.drawPoints;
     }
@@ -1078,29 +1100,31 @@ function fighterStats(pid) {
     if ((t.fightingSpirit || []).indexOf(pid) !== -1 && seasonIncludes(turnYear(t))) st.awards.push(t);
   });
   appState.matches.forEach(function (m) {
-    if (!m.completed) return;
+    if (!m.counts) return;
     var mt = turnById[m.turnId];
     if (!mt || !seasonIncludes(turnYear(mt))) return;
     var isWhite = m.whiteId === pid;
     var isRed = m.redId === pid;
     if (!isWhite && !isRed) return;
+    // An unrecorded match that counts is a 0-0 draw.
+    var res = m.completed ? m.result : 'Draw';
     st.played++;
     if (isWhite) {
       st.ipFor += m.whiteIppon;
       st.ipAgainst += m.redIppon;
       st.hansoku += m.whiteHansoku;
       (m.whiteIpponTypes || []).forEach(function (t) { if (st.types[t] !== undefined) st.types[t]++; });
-      if (m.result === 'White') { st.won++; st.points += s.winPoints; }
-      else if (m.result === 'Red') { st.lost++; st.points += s.lossPoints; }
-      else if (m.result === 'Draw') { st.drawn++; st.points += s.drawPoints; }
+      if (res === 'White') { st.won++; st.points += s.winPoints; }
+      else if (res === 'Red') { st.lost++; st.points += s.lossPoints; }
+      else if (res === 'Draw') { st.drawn++; st.points += s.drawPoints; }
     } else {
       st.ipFor += m.redIppon;
       st.ipAgainst += m.whiteIppon;
       st.hansoku += m.redHansoku;
       (m.redIpponTypes || []).forEach(function (t) { if (st.types[t] !== undefined) st.types[t]++; });
-      if (m.result === 'Red') { st.won++; st.points += s.winPoints; }
-      else if (m.result === 'White') { st.lost++; st.points += s.lossPoints; }
-      else if (m.result === 'Draw') { st.drawn++; st.points += s.drawPoints; }
+      if (res === 'Red') { st.won++; st.points += s.winPoints; }
+      else if (res === 'White') { st.lost++; st.points += s.lossPoints; }
+      else if (res === 'Draw') { st.drawn++; st.points += s.drawPoints; }
     }
   });
   return st;
@@ -1509,10 +1533,11 @@ function readPlayerSelect(card, field) {
 
 // Save the match on this card. The ippon count per side is the number
 // of filled type dropdowns, and the types are the filled values. The
-// result counts toward the scoreboard and Elo as soon as the recorder
-// sets it. No full refresh here: the score is already updated in place,
-// and the 15-second poll picks up the new state without wiping the form
-// the recorder is using.
+// result feeds into the scoreboard and Elo only once its round (or the
+// turn) is marked complete; until then it is recorded but not counted.
+// No full refresh here: the score is already updated in place, and the
+// 15-second poll picks up the new state without wiping the form the
+// recorder is using.
 async function saveMatchCard(card) {
   var matchId = card.dataset.match;
   var wTypes = readTypeSelects(card, 'white').filter(function (t) { return t; });
