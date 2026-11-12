@@ -1315,20 +1315,22 @@ function hofTabVisible() {
   return isEditor() || hofVisibleToViewers();
 }
 
-// Whether a player is Active in the selected season: they attended the
-// latest completed turn (or everyone is Active when no turn is complete
-// yet). Prefers the backend's list; falls back to the same rule computed
+// Whether a player is Active in the selected season: they attended one
+// of the two latest completed turns (or everyone is Active when no turn
+// is complete yet), so a player can skip one turn and stay Active.
+// Prefers the backend's list; falls back to the same rule computed
 // from the turns and player selections the page already has.
 function isPlayerActive(pid) {
   var hof = hallOfFame();
   if (hof && hof.activePlayerIds) return hof.activePlayerIds.indexOf(pid) !== -1;
   var seasonTurns = (appState.turns || []).filter(function (t) { return seasonIncludes(turnYear(t)); });
-  var latestComplete = null;
-  seasonTurns.forEach(function (t) {
-    if (t.status === 'Complete' && (!latestComplete || (t.date || '') > (latestComplete.date || ''))) latestComplete = t;
-  });
-  if (!latestComplete) return true;
-  return (appState.turnPlayers || []).some(function (tp) { return tp.turnId === latestComplete.id && tp.playerId === pid; });
+  var completedTurns = seasonTurns.filter(function (t) { return t.status === 'Complete'; })
+    .sort(function (a, b) { return (a.date || '').localeCompare(b.date || ''); });
+  var recentComplete = completedTurns.slice(-2);
+  if (!recentComplete.length) return true;
+  var recentIds = {};
+  recentComplete.forEach(function (t) { recentIds[t.id] = true; });
+  return (appState.turnPlayers || []).some(function (tp) { return recentIds[tp.turnId] && tp.playerId === pid; });
 }
 
 function updateHofTabVisibility() {
@@ -1387,7 +1389,7 @@ function renderHallOfFame() {
   var hof = hallOfFame();
   var html = '<div class="panel"><h2>Hall of Fame</h2>';
   html += '<p class="hof-note">Annual awards for the ' + selectedSeason + ' season, shared at the end of the season. ' +
-    'Only Active players (attended the latest completed turn) are eligible for the automatic awards.</p>';
+    'Only Active players (attended one of the two latest completed turns) are eligible for the automatic awards.</p>';
   if (isEditor()) {
     if (hofVisibleToViewers()) {
       html += '<p><span class="badge active">Visible to viewers</span> ' +
