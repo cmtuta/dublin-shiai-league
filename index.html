@@ -1476,15 +1476,14 @@ async function renderAdmin() {
     }
   }
   var html = '<div class="panel"><h2>Admin: logins</h2>' +
-    '<p class="hof-note">Every fighter gets a login automatically when they are added (username firstnamelastname, random 10-digit password, viewer role). Change a password or role here, delete a login, or create a login for someone who is not a fighter. Only the dublinshiaileague account sees this tab.</p>';
+    '<p class="hof-note">Every fighter gets a login automatically when they are added (username firstnamelastname, random 10-digit password, viewer role). Change a password or role here, delete a login, or create a login with a name. The Fighter tick box shows whether a login belongs to a fighter: tick it to add that person to the fighter list, so they show up in Fighters and can be added to rounds; untick it to remove them, which is only possible while they have no matches. Only the dublinshiaileague account sees this tab.</p>';
   if (!adminUsers.length) {
     html += '<p class="empty">No users yet.</p>';
   } else {
     html += '<div class="table-wrap"><table class="scoreboard"><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Fighter</th><th>Password</th><th></th></tr></thead><tbody>';
     adminUsers.forEach(function (u) {
-      var fighter = u.playerId ? playerName(u.playerId) : '';
       html += '<tr><td><strong>' + esc(u.username) + '</strong></td><td>' + esc(u.name || '') + '</td>' +
-        '<td>' + esc(u.role) + '</td><td>' + esc(fighter) + '</td><td><code>' + esc(u.password) + '</code></td>' +
+        '<td>' + esc(u.role) + '</td><td><input type="checkbox" data-action="admin-toggle-fighter" data-user="' + esc(u.username) + '"' + (u.playerId ? ' checked' : '') + (u.username === 'dublinshiaileague' ? ' disabled' : '') + ' aria-label="Fighter"></td><td><code>' + esc(u.password) + '</code></td>' +
         '<td><div class="btnrow">' +
         '<input type="text" id="pw-' + esc(u.username) + '" placeholder="New password" size="12" autocomplete="off">' +
         '<button class="btn small" data-action="admin-set-password" data-user="' + esc(u.username) + '">Set password</button>' +
@@ -1502,12 +1501,15 @@ async function renderAdmin() {
   }
   html += '<h3>Create a user</h3>' +
     '<div class="btnrow">' +
+    '<input type="text" id="new-user-first" placeholder="First name" autocomplete="off">' +
+    '<input type="text" id="new-user-last" placeholder="Last name" autocomplete="off">' +
     '<input type="text" id="new-user-name" placeholder="Username (letters and digits)" autocomplete="off">' +
     '<input type="text" id="new-user-pass" placeholder="Password (blank = random 10-digit)" autocomplete="off">' +
     '<select id="new-user-role"><option value="viewer">Viewer</option><option value="editor">Editor</option></select>' +
+    '<label><input type="checkbox" id="new-user-fighter"> Fighter</label>' +
     '<button class="btn" data-action="admin-create-user">Create user</button>' +
     '</div>' +
-    '<p class="hint">Usernames are lowercased and anything that is not a letter or digit is removed. A fighter added through the Fighters tab gets a login automatically, so you normally only create a user here for someone who is not a fighter.</p>' +
+    '<p class="hint">First and last name are required. Tick Fighter to also add this person to the fighter list, so they show up in Fighters and can be added to rounds. A fighter added through the Fighters tab gets a login automatically, so you normally only create a user here for someone who is not a fighter. Usernames are lowercased and anything that is not a letter or digit is removed.</p>' +
     '</div>';
   el.innerHTML = html;
 }
@@ -1668,21 +1670,48 @@ async function handleAction(action, target) {
       await api('deleteUser', { username: delUser });
       adminUsers = null;
       showStatus('Login deleted for ' + delUser + '.');
+    } else if (action === 'admin-toggle-fighter') {
+      // The Fighter tick box in the logins table. Ticking it makes
+      // the login a fighter (a Player row is created from the stored
+      // name, so they show up in the fighter list and can be added
+      // to rounds); unticking removes them, only while they have no
+      // matches. If the server refuses, the tick box reverts.
+      var tfUser = target.dataset.user;
+      var wantFighter = !!target.checked;
+      try {
+        await api('setUserFighter', { username: tfUser, fighter: wantFighter });
+        adminUsers = null;
+        showStatus(wantFighter ? tfUser + ' is now a fighter.' : tfUser + ' is no longer a fighter.');
+      } catch (err2) {
+        target.checked = !wantFighter;
+        throw err2;
+      }
     } else if (action === 'admin-create-user') {
       // Create a login. A blank password means the server generates a
-      // random 10-digit one and returns it.
+      // random 10-digit one and returns it. A first and last name are
+      // required; ticking Fighter also creates the fighter and links
+      // the login to them.
+      var newFirst = document.getElementById('new-user-first');
+      var newLast = document.getElementById('new-user-last');
       var newName = document.getElementById('new-user-name');
       var newPassInput = document.getElementById('new-user-pass');
       var newRoleSel = document.getElementById('new-user-role');
+      var newFighter = document.getElementById('new-user-fighter');
+      var first = newFirst ? newFirst.value.trim() : '';
+      var last = newLast ? newLast.value.trim() : '';
       var uname = newName ? newName.value.trim() : '';
+      if (!first || !last) { showStatus('Enter a first and last name first.', true); return; }
       if (!uname) { showStatus('Enter a username first.', true); return; }
       var created = await api('createUser', {
         username: uname,
         password: newPassInput ? newPassInput.value.trim() : '',
-        role: newRoleSel ? newRoleSel.value : 'viewer'
+        role: newRoleSel ? newRoleSel.value : 'viewer',
+        firstName: first,
+        lastName: last,
+        fighter: !!(newFighter && newFighter.checked)
       });
       adminUsers = null;
-      showStatus('User created: ' + created.user.username + ' / ' + created.user.password + ' (' + created.user.role + ').');
+      showStatus('User created: ' + created.user.username + ' / ' + created.user.password + ' (' + created.user.role + ')' + (created.playerId ? ' — also added as a fighter.' : '') + '.');
     } else if (action === 'add-fighting-spirit') {
       var fsAdd = document.getElementById('fs-add-' + turnId);
       var addId = fsAdd ? fsAdd.value : '';
