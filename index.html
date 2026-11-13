@@ -59,7 +59,7 @@
     padding: 0 16px;
     display: flex;
     gap: 4px;
-    /* Wrap on narrow screens so all six tabs stay inside the navy header
+    /* Wrap on narrow screens so all five tabs stay inside the navy header
        instead of overflowing onto the page background. */
     flex-wrap: wrap;
   }
@@ -96,6 +96,8 @@
     border-color: rgba(255, 255, 255, 0.55);
   }
   .btn.light:hover { background: rgba(255, 255, 255, 0.25); }
+  /* The Admin button in the header, shown when the Admin view is open. */
+  .btn.light.active { background: #fff; color: var(--navy); font-weight: 700; }
   .btn.ghost { background: #fff; color: var(--royal); }
   .btn.small { padding: 5px 10px; font-size: 13px; }
   .btn:disabled { opacity: 0.55; cursor: default; }
@@ -395,6 +397,7 @@
     </div>
     <div class="head-right">
       <span id="loginState"></span>
+      <button id="adminBtn" class="btn light" hidden>Admin</button>
       <button id="loginBtn" class="btn light">Login</button>
       <button id="logoutBtn" class="btn light" hidden>Log out</button>
     </div>
@@ -405,7 +408,6 @@
     <button class="tab" data-tab="scoreboard">Scoreboard</button>
     <button class="tab" data-tab="fighters">Fighters</button>
     <button class="tab" data-tab="halloffame" id="hofTabBtn">Hall of Fame</button>
-    <button class="tab" data-tab="admin" id="adminTabBtn" hidden>Admin</button>
   </nav>
 </header>
 
@@ -450,10 +452,10 @@ var appState = null;
 // token from the server (stored here, sent with every request); the
 // logged-in user and their role come back with getState. Roles:
 // 'viewer' (read-only), 'editor' (can make changes), 'admin' (the
-// dublinshiaileague account only, sees the Admin tab).
+// dublinshiaileague account only, sees the Admin view).
 var sessionToken = null;
 var currentUser = null;
-var adminUsers = null; // user list for the Admin tab, fetched on demand
+var adminUsers = null; // user list for the Admin view, fetched on demand
 try { sessionToken = localStorage.getItem('dsl_token') || null; } catch (err) { /* private mode */ }
 var currentTab = 'schedule';
 var editingTurnDate = null;
@@ -665,7 +667,8 @@ function render() {
       if (sec) sec.innerHTML = prompt;
     });
     updateHofTabVisibility();
-    updateAdminTabVisibility();
+    updateSeasonTabs();
+    updateAdminBtnVisibility();
     updateAuthUI();
     window.scrollTo(0, y);
     return;
@@ -677,7 +680,8 @@ function render() {
   renderHallOfFame();
   renderAdmin();
   updateHofTabVisibility();
-  updateAdminTabVisibility();
+  updateSeasonTabs();
+  updateAdminBtnVisibility();
   updateAuthUI();
   window.scrollTo(0, y);
 }
@@ -693,12 +697,26 @@ function updateAuthUI() {
   document.getElementById('loginState').textContent = label;
 }
 
-// The Admin tab is only for the dublinshiaileague admin account.
-function updateAdminTabVisibility() {
-  var btn = document.getElementById('adminTabBtn');
+// The Admin button in the header, beside Login/Logout. It is only for
+// the dublinshiaileague admin account; the Admin view is season-agnostic,
+// so it is a header button, not a tab nested under the seasons.
+function updateAdminBtnVisibility() {
+  var btn = document.getElementById('adminBtn');
   if (!btn) return;
   btn.hidden = !isAdmin();
   if (!isAdmin() && currentTab === 'admin') setTab('schedule');
+}
+
+// "All time" only shows the Scoreboard and Fighters tabs: the Schedule
+// and Results views are per-season, and Hall of Fame is annual (already
+// hidden for All time). If the user is on a tab All time hides, move
+// them to the Scoreboard, the first of the two tabs that stay.
+function updateSeasonTabs() {
+  var schedBtn = document.querySelector('.tab[data-tab="schedule"]');
+  var resBtn = document.querySelector('.tab[data-tab="results"]');
+  if (schedBtn) schedBtn.hidden = isAllTime();
+  if (resBtn) resBtn.hidden = isAllTime();
+  if (isAllTime() && (currentTab === 'schedule' || currentTab === 'results')) setTab('scoreboard');
 }
 
 function renderSchedule() {
@@ -1456,7 +1474,7 @@ function renderHallOfFame() {
 
 /* ---------- Admin (users) ---------- */
 
-// The Admin tab, only for the dublinshiaileague admin account. It lists
+// The Admin view, only for the dublinshiaileague admin account. It lists
 // every login (username, name, role, linked fighter, password) with
 // controls to change the password or role, delete the user, and create
 // a new user. The user list is fetched on demand (not in getState) and
@@ -1518,13 +1536,17 @@ async function renderAdmin() {
 
 function setTab(name) {
   // The Hall of Fame tab is only open when it is visible to this user,
-  // and the Admin tab only for the admin account.
+  // and the Admin view only for the admin account.
   if (name === 'halloffame' && !hofTabVisible()) name = 'schedule';
   if (name === 'admin' && !isAdmin()) name = 'schedule';
   currentTab = name;
   document.querySelectorAll('.tab').forEach(function (b) {
     b.classList.toggle('active', b.dataset.tab === name);
   });
+  // The Admin view is opened from the header button, not a tab, so its
+  // active state lives on that button.
+  var adminBtn = document.getElementById('adminBtn');
+  if (adminBtn) adminBtn.classList.toggle('active', name === 'admin');
   ['schedule', 'results', 'scoreboard', 'fighters', 'halloffame', 'admin'].forEach(function (t) {
     document.getElementById('tab-' + t).hidden = (t !== name);
   });
@@ -1958,6 +1980,12 @@ document.addEventListener('submit', async function (e) {
 document.getElementById('loginBtn').addEventListener('click', function () {
   document.getElementById('loginModal').hidden = false;
   document.getElementById('loginUser').focus();
+});
+
+// The Admin view is opened from this header button, beside Login/Logout,
+// not from a tab: its content is season-agnostic.
+document.getElementById('adminBtn').addEventListener('click', function () {
+  setTab(currentTab === 'admin' ? 'schedule' : 'admin');
 });
 
 document.getElementById('loginCancel').addEventListener('click', function () {
